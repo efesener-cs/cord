@@ -1,0 +1,6 @@
+{
+  "name": "@cord/sdk",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Platformdan bağımsız HTTP ve gerçek zamanlı istemci."
+}

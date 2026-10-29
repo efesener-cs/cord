@@ -1,0 +1,6 @@
+{
+  "name": "@cord/mobile",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Capacitor kabuğu ve ortak Vue mobil girişi."
+}

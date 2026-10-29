@@ -1,0 +1,15 @@
+.git
+.agents
+.codex
+.aws
+node_modules
+**/node_modules
+.pnpm-store
+**/dist
+**/build
+**/release
+**/coverage
+.env
+.env.*
+!.env.example
+*.log

@@ -1,0 +1,6 @@
+{
+  "name": "@cord/api",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Express/TypeScript HTTP API ve Socket.IO gerçek zamanlı gateway."
+}
