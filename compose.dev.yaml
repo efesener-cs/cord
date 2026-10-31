@@ -1,6 +1,16 @@
-# Explicit development override: docker compose -f compose.yaml -f compose.dev.yaml up web
+# Explicit development override: docker compose -f compose.yaml -f compose.dev.yaml up web-dev
 services:
-  web:
+  api:
+    image: cord-api-dev
+    build:
+      target: development
+    environment:
+      NODE_ENV: development
+    volumes:
+      - ./apps/api/src:/app/apps/api/src
+      - ./packages/contracts/src:/app/packages/contracts/src
+
+  web-dev:
     build:
       context: .
       dockerfile: infra/docker/web.Dockerfile
@@ -13,4 +23,9 @@ services:
       - ./apps/web/vite.config.ts:/app/apps/web/vite.config.ts
       - ./packages/client/src:/app/packages/client/src
       - ./packages/ui/src:/app/packages/ui/src
+    environment:
+      API_PROXY_TARGET: http://api:3000
+    depends_on:
+      api:
+        condition: service_healthy
     init: true

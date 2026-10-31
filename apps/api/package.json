@@ -2,5 +2,22 @@
   "name": "@cord/api",
   "version": "0.0.0",
   "private": true,
-  "description": "Express/TypeScript HTTP API ve Socket.IO gerçek zamanlı gateway."
+  "description": "Express/TypeScript HTTP API foundation.",
+  "dependencies": {
+    "express": "^5.3.0",
+    "helmet": "^8.3.0",
+    "@cord/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6"
+  },
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --filter @cord/contracts build && node --watch src/server.ts",
+    "build": "pnpm --filter @cord/contracts build && tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "typecheck": "pnpm --filter @cord/contracts build && tsc --noEmit -p tsconfig.json",
+    "test": "vp test run",
+    "test:watch": "vp test watch"
+  }
 }

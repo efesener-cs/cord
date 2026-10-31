@@ -60,13 +60,68 @@ pnpm mobile:dev
 
 Open http://localhost:5175. This uses the actual mobile entry point with the shared responsive UI. Browser device emulation is useful for layout checks, but does not test the native WebView, Android back button, keyboard insets, or native permissions.
 
-`apps/mobile/capacitor.config.ts` uses `webDir: "dist"` and the provisional identifier `dev.cord.preview`. Assets are bundled locally; no remote `server.url` or cleartext server override is configured. The mobile adapter uses safe-area padding and connects Android's hardware back button to router history, exiting the app only when native history cannot go back. Native plugin imports remain in `apps/mobile`.
+`apps/mobile/capacitor.config.ts` uses `webDir: "dist"` and the provisional identifier `dev.cord.preview`. Assets are bundled locally; no remote `server.url` or cleartext server override is configured. The mobile adapter uses safe-area padding, a content-resizing viewport directive, Android `adjustResize`, and connects Android's hardware back button to router history, exiting the app only when native history cannot go back. Native plugin imports remain in `apps/mobile`.
 
 ## Android emulator or device
 
 The generated project is already in `apps/mobile/android`. Do not run the add command again for an existing platform.
 
-Install Android Studio and its SDK components. The generated project targets/compiles SDK 36 and needs Java 21-compatible tooling; use Android Studio's supported JDK rather than assuming the shell's newest Java works with Gradle. Configure the SDK through Android Studio or an untracked `apps/mobile/android/local.properties` file. Start an emulator or connect a device with USB debugging enabled, then run:
+Install Android Studio and its SDK components. The generated project targets/compiles SDK 36 and needs Java 21-compatible tooling; use Android Studio's supported JDK rather than assuming the shell's newest Java works with Gradle. Gradle 8.14.3 does not support running on Java 25 or 27. Java 25 requires Gradle 9.1 or later; upgrading Gradle alone is not an Android plugin compatibility plan. Keep this project on JDK 21 and install it alongside the system JDK. On Arch:
+
+```sh
+sudo pacman -S --needed jdk21-openjdk
+```
+
+For a project-scoped command without changing the global Java default:
+
+```sh
+JAVA_HOME=/usr/lib/jvm/java-21-openjdk pnpm mobile:android
+```
+
+For the VS Code Java/Gradle importer, set `java.import.gradle.java.home` to `/usr/lib/jvm/java-21-openjdk` in your local editor settings, then reload/reimport the Gradle project. Android Studio has its own Gradle JDK setting; select the installed JDK 21 there as well. `java -version` in a terminal can differ from the IDE's selected JVM. Machine-specific paths do not belong in the shared Gradle configuration.
+
+Validate the selected JVM before an APK build:
+
+```sh
+cd apps/mobile/android
+JAVA_HOME=/usr/lib/jvm/java-21-openjdk ./gradlew --version
+```
+
+The installed Capacitor Android sources target Java 21. Installing the newest Arch Java package does not make an older Gradle wrapper compatible with it. See the [Gradle Java compatibility matrix](https://docs.gradle.org/current/userguide/compatibility.html) and [Arch JDK 21 package](https://archlinux.org/packages/extra/x86_64/jdk21-openjdk/).
+
+### SDK discovery and `ERR_SDK_NOT_FOUND`
+
+`adb` being installed does not mean a complete Android SDK is available. On Arch, an `android-sdk-platform-tools` package can provide `/opt/android-sdk/platform-tools` without platforms, build tools, command-line tools, or an emulator. Pointing `ANDROID_HOME` at that partial installation resolves discovery only; it does not install missing components.
+
+In Android Studio's SDK Manager, choose a writable SDK location (for example `$HOME/Android/Sdk`) and install Android SDK Platform 36, Android SDK Build-Tools 36.0.0, Android SDK Platform-Tools, and Android SDK Command-line Tools. For emulator testing, also install Android Emulator, a compatible system image, and create/start a virtual device. A physical device does not require an emulator image.
+
+The project Android launcher now discovers a complete SDK from an explicit environment variable, local `sdk.dir`, or standard Android Studio locations (including `$HOME/Android/Sdk`), and discovers the installed Arch JDK 21 when `JAVA_HOME` is absent. It passes the selected paths to child processes without changing the global shell or Java default. Check the detected paths before building:
+
+```sh
+pnpm mobile:android:check
+pnpm mobile:android
+```
+
+An explicit incomplete SDK or incompatible `JAVA_HOME` produces an early actionable error. The launcher builds the web bundle and invokes `cap run android`, which already performs sync; assets are no longer copied twice. Pass a target when multiple devices are attached:
+
+```sh
+pnpm mobile:android --target emulator-5554
+```
+
+For a manual override of SDK discovery, run from the repository root:
+
+```sh
+export ANDROID_HOME="$HOME/Android/Sdk"
+JAVA_HOME=/usr/lib/jvm/java-21-openjdk pnpm mobile:android
+```
+
+Use your SDK Manager's actual SDK location if it differs. `ANDROID_HOME` is the preferred current variable; `ANDROID_SDK_ROOT` is deprecated and, if already set, must not point to a different directory. If you bypass the project launcher, set `ANDROID_HOME` in your own shell configuration for persistence; an export in one terminal is not inherited by terminals already open elsewhere.
+
+For direct Gradle builds, configure Android Studio or put `sdk.dir=/absolute/path/to/Android/Sdk` in the untracked `apps/mobile/android/local.properties`. That file supplies Gradle's location. Raw Capacitor/native-run does not read it for SDK discovery, but this project's Android launcher now reads it and passes the selected SDK through `ANDROID_HOME` to its child processes. Direct `cap run` still needs the correct environment or a natively discoverable SDK. Do not commit a machine-specific SDK path.
+
+Official references: [Android environment variables](https://developer.android.com/tools/variables), [SDK Manager](https://developer.android.com/tools/sdkmanager), and [native-run Android errors](https://github.com/ionic-team/native-run/wiki/Android-Errors).
+
+Start an emulator or connect a device with USB debugging enabled, then run with the environment configured as above:
 
 ```sh
 pnpm mobile:android
@@ -113,6 +168,10 @@ Choose a simulator in Xcode and run. A real device also needs an appropriate sig
 On each native target, try signup/login with arbitrary nonempty preview credentials and confirm that the name reaches the dashboard. Switch themes and languages, open a direct-message conversation, and send enough local messages to require scrolling. The message composer and application chrome should remain visible while messages scroll. Check narrow and short windows, keyboard focus, mobile safe areas/keyboard behavior, Android back navigation, and restart behavior. State is intentionally in memory and resets when the app restarts.
 
 Native launcher icons and splash screens currently come from the generated Capacitor templates; `resources/` directories remain reserved for reviewed native branding. Backend authentication, real network messaging, push notifications, microphone/camera access, app links, secure credential storage, release signing, and store distribution are separate future work.
+
+## Recent verification
+
+On 2026-10-31, the project launcher discovered the installed SDK and JDK 21 without `ANDROID_HOME`/`JAVA_HOME` exports, built the APK with Gradle, and deployed it specifically to `emulator-5554` (Android API 37); the application process was confirmed running. This verifies the SDK discovery/deploy flow; it does not certify keyboard, file-picker, or visual layout behavior. The physically attached phone was not selected. Recheck the latest composer/keyboard changes on the emulator.
 
 ## Verification limits
 

@@ -25,9 +25,19 @@ The main logo is the lowercase monospace `c` with its small terminal-like dot, o
 
 The public home page (`/`) introduces Cord using the approved visual language, a community conversation illustration, a concise product explanation, and clear signup/login/dashboard-preview links. Do not substitute the dashboard for the public landing page. Describe self-hosting and unimplemented communication features as goals, not available services.
 
-Login (`/login`) and registration (`/register`) share a conventional labeled form layout, a quiet brand illustration, and links between the forms and public home. Reuse the main logo, semantic tokens, and theme/language controls. The form is the primary task; decorative branding gives way on narrow screens. The registration alert and permissive login are temporary UI preview behaviors documented in `development.md`.
+Login (`/login`) and registration (`/register`) share a conventional labeled form layout, a restrained terminal-window illustration with the `c.` mark, subtle Matrix code texture, and local connection/status lines, and links between the forms and public home. Reuse the main logo, semantic tokens, and theme/language controls. The form is the primary task; decorative branding gives way on narrow screens. The registration alert and permissive login are temporary UI preview behaviors documented in `development.md`.
 
 The communication application lives at `/dashboard`. Its default overview is labeled “Genel bakış” in Turkish and “Overview” in English; avoid game-like labels such as “Ana üs” or “Home base”. Use Vue Router and `RouterLink` for navigation between screens. Keep shared routing in `packages/client`, with platform history supplied by application adapters. A small Pinia session store shares the display name across login and dashboard; passwords and form-only values do not belong in global state.
+
+## Local chat, rooms, and notifications
+
+The server rail opens the Forest, Terminal, and Night Owls room lists. Each server has distinct local text rooms. Show rooms in the sidebar only while a server is active. There is no Inbox entry or page. Messages is a navigation button, never an expandable section: it must not reveal people or DM shortcuts below it. Leave the sidebar below navigation empty on personal screens. Clicking Messages shows the people/conversation list exclusively in the center; selecting a person opens their conversation there. Opening the dashboard starts on Overview with no conversation selected. Switching rooms or DMs preserves separate session histories.
+
+DMs and rooms share a conversation component. Enter sends; Shift+Enter inserts a new line; IME composition must not accidentally submit. A visibly labeled local echo makes a typed `test` message immediately testable without the API. Initial conversation content and notification items are sample data, not remote messages.
+
+Place the message field, attachment/add control, and send control in separate layout columns so buttons never cover text. The add control opens an upward attachment menu for files/images. Selected files appear as removable pending attachments; sent files show names/sizes and a download link, with safe raster-image previews. Allow attachment-only messages. The preview limit is four files per message and 10 MiB per file. Blob URLs are session-local, pending URLs are released when discarded, and sent URLs are released when the demo session is reset. Do not render attached HTML or SVG as inline active content. No upload to the server occurs.
+
+The notification bell opens a nonmodal popover containing received-message previews and unread state; it does not navigate directly to the inbox page. Clicking a notice opens its sender's DM and marks that conversation read. Support outside-click and Escape dismissal, keyboard focus, and constrained scrolling on short screens. The bell badge counts unread notices; the initial preview has three. Unread notices and corresponding central conversation rows use an accent background, edge, and explicit unread label. Opening a conversation marks its notices read and updates the badges. Opening the popover alone does not clear unread state. A clearly labeled action can simulate an incoming message for testing.
 
 ## Layout and scrolling
 
@@ -35,7 +45,7 @@ The dashboard application is a viewport-sized shell, not a vertically scrolling 
 
 - Keep the server rail, navigation sidebar, top bar, and status bar within the viewport. The document itself must not scroll.
 - Allow the server rail and sidebar content to scroll internally on short screens. Keep the sidebar profile controls outside its scrolling content.
-- The desktop dashboard has a central welcome/friends column and a secondary activity column. Each column scrolls independently when its content exceeds the available height.
+- The desktop overview has a central welcome/recommendations column and a secondary activity column. Reuse the login terminal illustration in the welcome card, without orbital decoration. Below it, show local community discovery cards and conversation continuation suggestions instead of a friends list. Community cards open existing sample server rooms; they do not claim to join a remote server. Messages and Friends show their lists in the center without the secondary activity column. Each column scrolls independently when its content exceeds the available height.
 - A conversation occupies the space between the application header and status bar. Its message list scrolls independently; the conversation header and message composer stay visible.
 - Let flex layout determine the remaining conversation height. Do not subtract assumed header/footer pixel heights from the viewport. Nested flex containers and scrolling children need `min-height: 0` so content can shrink within the shell.
 - Contain scrolling within each region. Modal content must also remain reachable through internal scrolling on short screens.

@@ -25,7 +25,8 @@
     "add:android": "pnpm build && cap add android",
     "add:ios": "pnpm build && cap add ios",
     "sync": "pnpm build && cap sync",
-    "android": "pnpm build && cap sync android && cap run android",
-    "ios": "pnpm build && cap sync ios && cap run ios"
+    "android": "node scripts/android.ts",
+    "ios": "pnpm build && cap sync ios && cap run ios",
+    "android:check": "node scripts/android.ts --check"
   }
 }

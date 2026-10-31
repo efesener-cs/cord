@@ -1,0 +1,32 @@
+{
+	admin off
+}
+
+http://:80 {
+	root * /srv
+	encode zstd gzip
+
+	handle /healthz {
+		respond "ok" 200
+	}
+
+	# Preserve the versioned API path and keep API 404s out of SPA fallback.
+	@api path /api /api/*
+	handle @api {
+		reverse_proxy api:3000
+	}
+
+	# Missing hashed assets must return 404 rather than the SPA document.
+	handle /assets/* {
+		@existing file {path}
+		header @existing Cache-Control "public, max-age=31536000, immutable"
+		file_server
+	}
+
+	# HTML5 history routes work when opened directly or refreshed.
+	handle {
+		try_files {path} /index.html
+		header Cache-Control "no-cache"
+		file_server
+	}
+}

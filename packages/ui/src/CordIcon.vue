@@ -1,6 +1,9 @@
 <script setup lang="ts">
 defineProps<{ name: string; size?: number }>();
 const paths: Record<string, string> = {
+  file: "M14 2H6a2 2 0 0 0-2 2v16h16V8l-6-6Zm0 0v6h6M8 13h8M8 17h6",
+  image: "M3 3h18v18H3V3Zm0 14 6-6 5 5 3-3 4 4M16 7h.01",
+  download: "M12 3v12m-5-5 5 5 5-5M5 17v4h14v-4",
   eye: "M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Zm13 0a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z",
   eyeOff:
     "m3 3 18 18M10.5 5.1 12 5c6.5 0 10 7 10 7a19 19 0 0 1-3 3.8M6 6.5A21 21 0 0 0 2 12s3.5 7 10 7a12 12 0 0 0 5-1.2M10 10a3 3 0 0 0 4 4",

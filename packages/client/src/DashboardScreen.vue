@@ -2,11 +2,14 @@
 import { computed, nextTick, ref, watch } from "vue";
 import Icon from "@cord/ui/CordIcon.vue";
 import CordLogo from "@cord/ui/CordLogo.vue";
-import { friends, type Friend } from "./demo";
+import { friends, servers, type Friend } from "./demo";
 import { useDemoStore } from "./store";
 import { useSessionStore } from "./session";
 import { useRouter } from "vue-router";
 import AppearanceControls from "./AppearanceControls.vue";
+import ChatPanel from "./ChatPanel.vue";
+import AuthTerminal from "./AuthTerminal.vue";
+import NotificationsPopover from "./NotificationsPopover.vue";
 import { usePreferences } from "./preferences";
 
 const preferences = usePreferences();
@@ -21,19 +24,38 @@ const avatarInitial = computed(() =>
 );
 function signOut() {
   session.clear();
-  store.messages = {};
-  store.muted = false;
-  store.deafened = false;
+  store.reset();
   void router.push("/login");
 }
 const section = ref("home");
 const filter = ref("online");
+const hasUnread = (id: string): boolean =>
+  store.notifications.some((notice) => notice.friendId === id && !notice.read);
 const query = ref("");
 const selectedFriend = ref<Friend | null>(null);
 const dialog = ref<"friend" | "server" | "settings" | null>(null);
 const friendHandle = ref("");
 const feedback = ref("");
-const draft = ref("");
+const activeServer = ref(servers[0]!);
+const selectedRoomId = ref<string | null>(null);
+const activeRoom = computed(() =>
+  activeServer.value.rooms.find((room) => room.id === selectedRoomId.value),
+);
+const activeThread = computed(() =>
+  selectedFriend.value
+    ? `dm:${selectedFriend.value.id}`
+    : activeRoom.value
+      ? `server:${activeServer.value.id}:${activeRoom.value.id}`
+      : null,
+);
+const activeTitle = computed(
+  () => selectedFriend.value?.name ?? t(activeRoom.value?.label ?? "generalChannel"),
+);
+const activeSubtitle = computed(() =>
+  selectedFriend.value
+    ? t(selectedFriend.value.activity)
+    : `${t(activeServer.value.label)} / ${t("room")}`,
+);
 const mobileNav = ref(false);
 const modalElement = ref<HTMLElement | null>(null);
 let previousFocus: HTMLElement | null = null;
@@ -66,7 +88,6 @@ async function focusSearch() {
   await nextTick();
   document.getElementById("friend-search")?.focus();
 }
-const messageList = ref<HTMLElement | null>(null);
 const onlineCount = friends.filter((friend) => friend.presence !== "offline").length;
 const visibleFriends = computed(() =>
   friends.filter(
@@ -78,25 +99,50 @@ const visibleFriends = computed(() =>
   ),
 );
 function navigate(value: string) {
-  section.value = value;
+  const server = servers.find((item) => item.id === value);
   selectedFriend.value = null;
+  if (server) {
+    activeServer.value = server;
+    selectedRoomId.value = server.rooms[0]!.id;
+    section.value = "server";
+    mobileNav.value = true;
+  } else {
+    selectedRoomId.value = null;
+    section.value = value;
+    mobileNav.value = false;
+  }
+}
+function openRoom(id: string): void {
+  selectedFriend.value = null;
+  selectedRoomId.value = id;
+  section.value = "server";
   mobileNav.value = false;
 }
 function openChat(friend: Friend) {
   selectedFriend.value = friend;
+  selectedRoomId.value = null;
+  section.value = "messages";
+  store.markRead(friend.id);
   mobileNav.value = false;
+}
+function openChatById(id: string): void {
+  const friend = friends.find((item) => item.id === id);
+  if (friend) openChat(friend);
+}
+function previewFor(id: string): string {
+  const latest = store.messages[`dm:${id}`]?.at(-1);
+  if (!latest) {
+    const notice = store.notifications.find((item) => item.friendId === id);
+    return notice ? (notice.textKey ? t(notice.textKey) : notice.text) : t("noMessageYet");
+  }
+  return latest.textKey
+    ? t(latest.textKey)
+    : latest.text || latest.attachments.map((file) => file.name).join(", ");
 }
 function openDialog(value: "friend" | "server" | "settings") {
   feedback.value = "";
   friendHandle.value = "";
   dialog.value = value;
-}
-async function sendMessage() {
-  if (!selectedFriend.value || !draft.value.trim()) return;
-  store.send(selectedFriend.value.id, draft.value);
-  draft.value = "";
-  await nextTick();
-  messageList.value?.scrollTo({ top: messageList.value.scrollHeight, behavior: "smooth" });
 }
 function submitFriend() {
   if (friendHandle.value.trim()) feedback.value = "friend";
@@ -112,6 +158,7 @@ function submitFriend() {
       <div class="rail-rule"></div>
       <button
         class="server-icon forest"
+        :class="{ 'server-selected': activeServer.id === 'forest' && !!activeRoom }"
         :aria-label="t('forestPreview')"
         @click="navigate('forest')"
       >
@@ -119,12 +166,18 @@ function submitFriend() {
       </button>
       <button
         class="server-icon terminal"
+        :class="{ 'server-selected': activeServer.id === 'terminal' && !!activeRoom }"
         :aria-label="t('terminalPreview')"
         @click="navigate('terminal')"
       >
         &gt;_
       </button>
-      <button class="server-icon sunset" :aria-label="t('nightPreview')" @click="navigate('night')">
+      <button
+        class="server-icon sunset"
+        :class="{ 'server-selected': activeServer.id === 'night' && !!activeRoom }"
+        :aria-label="t('nightPreview')"
+        @click="navigate('night')"
+      >
         月
       </button>
       <button
@@ -164,39 +217,32 @@ function submitFriend() {
             <Icon name="people" /><span>{{ t("friends") }}</span
             ><span class="count">{{ onlineCount }}</span>
           </button>
-          <button
-            :class="{ active: section === 'inbox' && !selectedFriend }"
-            @click="navigate('inbox')"
-          >
-            <Icon name="chat" /><span>{{ t("inbox") }}</span>
+          <button :class="{ active: section === 'messages' }" @click="navigate('messages')">
+            <Icon name="chat" /><span>{{ t("messages") }}</span
+            ><span v-if="store.unreadCount" class="count">{{ store.unreadCount }}</span>
           </button>
         </nav>
-        <div class="section-label">
-          <span>{{ t("directMessages") }}</span
-          ><button :aria-label="t('newChat')" @click="navigate('friends')">
-            <Icon name="plus" :size="16" />
-          </button>
-        </div>
-        <div class="dm-list">
-          <button
-            v-for="friend in friends.slice(0, 4)"
-            :key="friend.id"
-            :class="{ 'dm-active': selectedFriend?.id === friend.id }"
-            @click="openChat(friend)"
-          >
-            <span class="avatar small" :class="friend.color"
-              >{{ friend.initials }}<i :class="friend.presence"></i
-            ></span>
-            <span>{{ friend.name }}</span
-            ><span v-if="friend.id === 'nova'" class="dm-note">♫</span>
-          </button>
-        </div>
-        <div class="sidebar-note">
-          <span class="tiny-spark">✳</span>
-          <p>
-            {{ t("quietCorner") }}<br /><span>{{ t("betterTogether") }}</span>
-          </p>
-        </div>
+        <template v-if="section === 'server'">
+          <div class="section-label">
+            <span>{{ t("serverRooms") }}</span
+            ><Icon name="hash" :size="14" />
+          </div>
+          <div class="server-room-heading">
+            <Icon :name="activeServer.icon" :size="17" /><strong>{{ t(activeServer.label) }}</strong
+            ><span class="version">LOCAL</span>
+          </div>
+          <div class="room-list">
+            <button
+              v-for="room in activeServer.rooms"
+              :key="room.id"
+              :class="{ 'room-active': activeRoom?.id === room.id }"
+              @click="openRoom(room.id)"
+            >
+              <Icon name="hash" :size="17" /><span>{{ t(room.label) }}</span
+              ><Icon v-if="activeRoom?.id === room.id" name="chevron" :size="13" />
+            </button>
+          </div>
+        </template>
       </div>
       <div class="profile">
         <span class="avatar small self"
@@ -230,17 +276,21 @@ function submitFriend() {
           >
             <Icon name="home" /></button
           ><Icon name="home" :size="18" /><span>{{
-            selectedFriend ? t("dmBreadcrumb") : t("personalSpace")
+            selectedFriend
+              ? t("dmBreadcrumb")
+              : activeRoom
+                ? t(activeServer.label)
+                : t("personalSpace")
           }}</span
           ><span class="slash">/</span
           ><strong>{{
-            selectedFriend?.name ??
+            (activeThread ? activeTitle : null) ??
             (section === "home"
               ? t("home")
               : section === "friends"
                 ? t("friends")
-                : section === "inbox"
-                  ? t("inbox")
+                : section === "messages"
+                  ? t("messages")
                   : t("serverPreview"))
           }}</strong>
         </div>
@@ -250,14 +300,11 @@ function submitFriend() {
           </button>
           <AppearanceControls />
           <span class="preview-badge">{{ t("localPreview") }}</span
-          ><span class="topbar-divider"></span
-          ><button :aria-label="t('notifications')" @click="navigate('inbox')">
-            <Icon name="bell" :size="19" />
-          </button>
+          ><span class="topbar-divider"></span><NotificationsPopover @open-dm="openChatById" />
         </div>
       </header>
 
-      <main v-if="!selectedFriend" class="dashboard">
+      <main v-if="!activeThread" class="dashboard">
         <div class="main-column">
           <template v-if="section === 'home' || section === 'friends'">
             <section v-if="section === 'home'" class="welcome">
@@ -269,15 +316,7 @@ function submitFriend() {
                   {{ t("bringFriend") }} <Icon name="arrow" :size="16" />
                 </button>
               </div>
-              <div class="matrix-art" aria-hidden="true">
-                <div class="code-rain">
-                  01　コ　10　リ　0　01<br />　1　ド　0　01　ノ<br />0　01　　1　0　コ<br />　リ　10　0　ド　1<br />01　0　ノ　01　　0<br />　1　01　コ　0　リ
-                </div>
-                <div class="orbit orbit-one"></div>
-                <div class="orbit orbit-two"></div>
-                <CordLogo class="art-symbol" mark-only />
-                <span class="art-coordinate">35° 41′ N / CONNECTED</span>
-              </div>
+              <AuthTerminal class="welcome-terminal" />
               <div class="welcome-footer">
                 <span
                   ><span class="connection-dot"></span> {{ onlineCount }}
@@ -285,7 +324,54 @@ function submitFriend() {
                 ><span>{{ t("makeAtHome") }}</span>
               </div>
             </section>
-            <section class="friends-section">
+            <section v-if="section === 'home'" class="recommendations">
+              <div class="section-heading">
+                <div>
+                  <Icon name="leaf" :size="21" />
+                  <h2>{{ t("forYou") }}</h2>
+                </div>
+                <span class="recommendation-label">{{ t("localPreview") }}</span>
+              </div>
+              <p class="recommendation-intro">{{ t("recommendationIntro") }}</p>
+              <div class="recommendation-grid">
+                <button
+                  v-for="server in servers"
+                  :key="server.id"
+                  class="recommendation-card"
+                  @click="navigate(server.id)"
+                >
+                  <span class="recommendation-icon"><Icon :name="server.icon" :size="23" /></span>
+                  <span class="recommendation-copy"
+                    ><small>{{ t("discoverServer") }}</small
+                    ><strong>{{ t(server.label) }}</strong
+                    ><span>{{ t("serverSuggestion") }}</span></span
+                  >
+                  <Icon name="arrow" :size="17" />
+                </button>
+              </div>
+              <h3 class="resume-heading">{{ t("continueConversation") }}</h3>
+              <button
+                v-for="friend in friends.slice(0, 2)"
+                :key="friend.id"
+                class="friend-row"
+                :class="{ 'conversation-unread': hasUnread(friend.id) }"
+                @click="openChat(friend)"
+              >
+                <span class="avatar" :class="friend.color"
+                  >{{ friend.initials }}<i :class="friend.presence"></i
+                ></span>
+                <span class="friend-info"
+                  ><strong
+                    >{{ friend.name
+                    }}<small v-if="hasUnread(friend.id)" class="unread-label">{{
+                      t("unread")
+                    }}</small></strong
+                  ><span>{{ previewFor(friend.id) }}</span></span
+                >
+                <Icon name="arrow" :size="17" />
+              </button>
+            </section>
+            <section v-if="section === 'friends'" class="friends-section">
               <div class="section-heading">
                 <div>
                   <Icon name="people" :size="21" />
@@ -352,33 +438,31 @@ function submitFriend() {
               ><span class="bottom-line"></span><span class="mono">est. 2026</span>
             </div>
           </template>
-          <section v-else-if="section === 'inbox'" class="simple-page">
-            <span class="eyebrow">{{ t("inboxHeading") }}</span>
-            <h1>{{ t("allQuiet") }}<span>_</span></h1>
-            <p>{{ t("noNotifications") }}</p>
-            <button class="primary-button" @click="navigate('friends')">
-              {{ t("browseFriends") }} <Icon name="arrow" :size="17" />
-            </button>
-          </section>
           <section v-else class="simple-page">
-            <Icon :name="section === 'forest' ? 'leaf' : 'hash'" :size="36" />
-            <h1>
-              {{
-                section === "forest"
-                  ? t("forest")
-                  : section === "terminal"
-                    ? t("terminal")
-                    : t("nightOwls")
-              }}<span>_</span>
-            </h1>
-            <p>{{ t("serverDescription") }}</p>
-            <button class="primary-button" @click="navigate('home')">
-              {{ t("backHome") }} <Icon name="arrow" :size="17" />
+            <span class="eyebrow">{{ t("dmBreadcrumb") }}</span>
+            <h1>{{ t("openMessages") }}<span>_</span></h1>
+            <button
+              v-for="friend in friends"
+              :key="friend.id"
+              class="friend-row"
+              :class="{ 'conversation-unread': hasUnread(friend.id) }"
+              @click="openChat(friend)"
+            >
+              <span class="avatar" :class="friend.color"
+                >{{ friend.initials }}<i :class="friend.presence"></i></span
+              ><span class="friend-info"
+                ><strong
+                  >{{ friend.name }}<small>{{ friend.handle }}</small
+                  ><small v-if="hasUnread(friend.id)" class="unread-label">{{
+                    t("unread")
+                  }}</small></strong
+                ><span>{{ previewFor(friend.id) }}</span></span
+              ><Icon name="chat" :size="19" />
             </button>
           </section>
         </div>
 
-        <aside class="activity-column" :aria-label="t('activities')">
+        <aside v-if="section === 'home'" class="activity-column" :aria-label="t('activities')">
           <div class="activity-title">
             <h2>{{ t("happening") }}</h2>
             <span class="live-label"><i></i> {{ t("liveDemo") }}</span>
@@ -443,52 +527,15 @@ function submitFriend() {
         </aside>
       </main>
 
-      <main v-else class="chat-view">
-        <header class="chat-header">
-          <span class="avatar small" :class="selectedFriend.color"
-            >{{ selectedFriend.initials }}<i :class="selectedFriend.presence"></i
-          ></span>
-          <div>
-            <h2>{{ selectedFriend.name }}</h2>
-            <span>{{ t(selectedFriend.activity) }}</span>
-          </div>
-          <button class="text-button" @click="selectedFriend = null">
-            {{ t("goBack") }} <Icon name="close" :size="17" />
-          </button>
-        </header>
-        <div ref="messageList" class="message-list" aria-live="polite">
-          <div class="chat-intro">
-            <span class="avatar large" :class="selectedFriend.color">{{
-              selectedFriend.initials
-            }}</span>
-            <h1>{{ t("chatWith", { name: selectedFriend.name }) }}<span>_</span></h1>
-            <p>{{ t("chatPreview") }}</p>
-          </div>
-          <div
-            v-for="(message, index) in store.messages[selectedFriend.id] ?? []"
-            :key="index"
-            class="message"
-          >
-            <span class="avatar small self">{{ avatarInitial }}.</span>
-            <div>
-              <strong
-                >{{ displayName }} <span>{{ t("localMessage") }}</span></strong
-              >
-              <p>{{ message }}</p>
-            </div>
-          </div>
-        </div>
-        <form class="message-composer" @submit.prevent="sendMessage">
-          <input
-            v-model="draft"
-            :aria-label="t('messageFor', { name: selectedFriend.name })"
-            :placeholder="t('writeTo', { name: selectedFriend.name })"
-            maxlength="2000"
-          /><button type="submit" :aria-label="t('send')" :disabled="!draft.trim()">
-            <Icon name="send" />
-          </button>
-        </form>
-      </main>
+      <ChatPanel
+        v-else
+        :key="activeThread"
+        :thread-id="activeThread"
+        :title="activeTitle"
+        :subtitle="activeSubtitle"
+        v-bind="selectedFriend ? { friendId: selectedFriend.id } : {}"
+        @back="navigate(selectedFriend ? 'messages' : 'home')"
+      />
       <footer class="statusbar">
         <span
           ><span class="connection-dot"></span> {{ t("systemsQuiet") }}
@@ -591,9 +638,7 @@ function submitFriend() {
 .workspace-brand,
 .profile,
 .topbar,
-.statusbar,
-.chat-header,
-.message-composer {
+.statusbar {
   flex-shrink: 0;
 }
 .brand-mark {
@@ -1067,61 +1112,6 @@ h1 > span {
   font: 8px var(--mono);
   letter-spacing: 1px;
   color: var(--muted);
-}
-.matrix-art {
-  position: absolute;
-  top: 0;
-  right: 0;
-  height: 245px;
-  width: 235px;
-  overflow: hidden;
-  opacity: 0.7;
-  mask-image: linear-gradient(90deg, transparent, black 40%);
-  background: repeating-linear-gradient(0deg, transparent 0 3px, var(--art-scan) 3px 4px);
-}
-.code-rain {
-  position: absolute;
-  inset: -20px 0 0;
-  font: 12px/35px var(--mono);
-  letter-spacing: 7px;
-  color: var(--art-ink);
-  opacity: 0.2;
-  transform: rotate(-6deg);
-}
-.art-symbol {
-  position: absolute;
-  left: 80px;
-  top: 55px;
-  width: 120px;
-  height: 120px;
-  color: var(--art-ink);
-  opacity: 0.65;
-  filter: drop-shadow(0 0 18px var(--art-glow));
-}
-.orbit {
-  position: absolute;
-  border: 1px solid var(--art-orbit);
-  width: 170px;
-  height: 170px;
-  border-radius: 50%;
-  top: 30px;
-  left: 50px;
-}
-.orbit-two {
-  transform: rotate(-35deg);
-  border-radius: 50%;
-  width: 210px;
-  height: 100px;
-  top: 66px;
-  left: 26px;
-}
-.art-coordinate {
-  position: absolute;
-  bottom: 12px;
-  right: 18px;
-  font: 7px var(--mono);
-  letter-spacing: 1.5px;
-  color: var(--art-ink);
 }
 .friends-section {
   margin-top: 32px;
@@ -1627,99 +1617,6 @@ h3 {
 .primary-button:hover {
   background: var(--active-hover);
 }
-.chat-view {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-}
-.chat-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 21px 30px;
-  border-bottom: 1px solid var(--line);
-}
-.chat-header > div > span {
-  font-size: 11px;
-  color: var(--muted);
-  display: block;
-  margin-top: 5px;
-}
-.chat-header > button {
-  margin-left: auto;
-}
-.message-list {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
-  padding: 30px;
-}
-.chat-intro {
-  padding: 24px 0 35px;
-}
-.avatar.large {
-  width: 65px;
-  height: 65px;
-  font-size: 28px;
-  border-radius: 22px;
-}
-.chat-intro p {
-  font-size: 13px;
-  color: var(--muted);
-  line-height: 1.7;
-}
-.message {
-  display: flex;
-  gap: 13px;
-  margin: 24px 0;
-}
-.message > div {
-  min-width: 0;
-}
-.message strong {
-  font-size: 12px;
-}
-.message strong > span {
-  font-size: 9px;
-  font-weight: 400;
-  margin-left: 10px;
-  color: var(--muted);
-}
-.message p {
-  margin: 7px 0 0;
-  font-size: 14px;
-  line-height: 1.7;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.message-composer {
-  display: flex;
-  border: 1px solid var(--line);
-  background: var(--surface);
-  border-radius: 8px;
-  padding: 10px 15px;
-  margin: 15px 30px 25px;
-}
-.message-composer input {
-  flex: 1;
-  min-width: 0;
-  background: none;
-  border: none;
-  color: var(--text);
-  padding: 6px;
-  font-size: 13px;
-}
-.message-composer button {
-  background: none;
-  color: var(--green);
-  padding: 5px;
-  display: grid;
-  place-items: center;
-}
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -1800,10 +1697,6 @@ h3 {
   .welcome-content {
     padding: 40px 32px;
   }
-  .matrix-art {
-    width: 300px;
-    height: 280px;
-  }
   .friend-row {
     padding: 20px 2px;
   }
@@ -1831,10 +1724,6 @@ h3 {
   .welcome-content {
     padding-left: 22px;
   }
-  .matrix-art {
-    opacity: 0.4;
-    width: 180px;
-  }
   .welcome-footer > span:last-child {
     display: none;
   }
@@ -1851,10 +1740,6 @@ h3 {
   }
   .dashboard {
     padding: 28px;
-  }
-  .matrix-art {
-    opacity: 0.7;
-    width: 235px;
   }
   .welcome-content {
     padding: 30px;
@@ -1955,10 +1840,6 @@ h3 {
   .welcome p {
     font-size: 12px;
   }
-  .matrix-art {
-    width: 150px;
-    opacity: 0.25;
-  }
   .welcome-footer {
     padding: 12px 17px;
   }
@@ -2008,22 +1889,6 @@ h3 {
   .status-divider {
     display: none;
   }
-  .chat-header,
-  .message-list {
-    padding: 20px;
-  }
-  .chat-header .text-button {
-    font-size: 10px;
-  }
-  .chat-header > div > span {
-    display: none;
-  }
-  .chat-intro h1 {
-    font-size: 24px;
-  }
-  .message-composer {
-    margin: 10px 18px 20px;
-  }
   .modal {
     padding: 30px 24px;
   }
@@ -2043,6 +1908,169 @@ h3 {
 }
 @media (max-width: 720px) {
   .topbar-right {
+    gap: 10px;
+  }
+}
+
+.server-icon.server-selected {
+  outline: 1px solid var(--green);
+  outline-offset: 3px;
+}
+.server-room-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 11px 13px;
+  color: var(--green);
+}
+.server-room-heading strong {
+  font-size: 12px;
+  font-weight: 550;
+}
+.server-room-heading .version {
+  margin-left: auto;
+  font-size: 7px;
+}
+.room-list {
+  display: grid;
+  gap: 4px;
+}
+.room-list button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 12px;
+  border-radius: 5px;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: left;
+}
+.room-list button > span {
+  flex: 1;
+}
+.room-list button:hover {
+  background: var(--hover);
+}
+.room-list button.room-active {
+  background: var(--active);
+  color: var(--green);
+}
+
+.welcome {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 260px);
+  align-items: center;
+}
+.welcome-terminal {
+  width: calc(100% - 20px);
+  margin: 16px 20px 16px 0;
+  transform: none;
+}
+.welcome-footer {
+  grid-column: 1 / -1;
+}
+.recommendations {
+  margin-top: 30px;
+}
+.recommendation-label {
+  font: 8px var(--mono);
+  color: var(--muted);
+}
+.recommendation-intro {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.8;
+}
+.recommendation-grid {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+}
+.recommendation-card {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  width: 100%;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  text-align: left;
+}
+.recommendation-card:hover {
+  background: var(--hover);
+  border-color: var(--accent-line);
+}
+.recommendation-icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  background: var(--active);
+  color: var(--green);
+  flex-shrink: 0;
+}
+.recommendation-copy {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+.recommendation-copy small {
+  font: 8px var(--mono);
+  color: var(--green);
+}
+.recommendation-copy strong {
+  font-size: 14px;
+}
+.recommendation-copy > span {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+.recommendation-card > svg {
+  color: var(--green);
+  flex-shrink: 0;
+}
+.resume-heading {
+  margin: 28px 0 8px;
+}
+.friend-row.conversation-unread {
+  background: var(--active);
+  border-radius: 6px;
+  padding-left: 12px;
+  padding-right: 12px;
+  box-shadow: inset 3px 0 var(--green);
+}
+.friend-row.conversation-unread .friend-info > span {
+  color: var(--text);
+}
+.friend-info small.unread-label {
+  color: var(--green);
+  font: 9px var(--mono);
+  margin-left: auto;
+}
+@media (max-width: 1220px) and (min-width: 1051px), (max-width: 850px) {
+  .welcome {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .welcome-terminal {
+    width: calc(100% - 40px);
+    max-width: none;
+    margin: 0 20px 20px;
+  }
+}
+@media (max-width: 480px) {
+  .recommendation-label {
+    display: none;
+  }
+  .friend-info strong {
+    flex-wrap: wrap;
+  }
+  .recommendation-card {
+    padding: 13px;
     gap: 10px;
   }
 }

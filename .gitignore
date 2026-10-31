@@ -25,3 +25,6 @@ apps/mobile/ios/**/xcuserdata/
 *.keystore
 *.p12
 *.mobileprovision
+
+# Local implementation reports and planning notes.
+/result/

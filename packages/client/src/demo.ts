@@ -56,3 +56,46 @@ export const friends: Friend[] = [
     activity: "offline",
   },
 ];
+
+export interface DemoRoom {
+  id: string;
+  label: TranslationKey;
+}
+export interface DemoServer {
+  id: string;
+  label: TranslationKey;
+  icon: string;
+  rooms: DemoRoom[];
+}
+export const servers: DemoServer[] = [
+  {
+    id: "forest",
+    label: "forest",
+    icon: "leaf",
+    rooms: [
+      { id: "general", label: "generalChannel" },
+      { id: "campfire", label: "campfire" },
+      { id: "design", label: "designChannel" },
+    ],
+  },
+  {
+    id: "terminal",
+    label: "terminal",
+    icon: "hash",
+    rooms: [
+      { id: "general", label: "generalChannel" },
+      { id: "code", label: "codeRoom" },
+      { id: "sandbox", label: "sandboxRoom" },
+    ],
+  },
+  {
+    id: "night",
+    label: "nightOwls",
+    icon: "moon",
+    rooms: [
+      { id: "general", label: "generalChannel" },
+      { id: "late-night", label: "nightChannel" },
+      { id: "music", label: "musicRoom" },
+    ],
+  },
+];

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { useRouter } from "vue-router";
-import CordLogo from "@cord/ui/CordLogo.vue";
+import AuthTerminal from "./AuthTerminal.vue";
 import Icon from "@cord/ui/CordIcon.vue";
 import PublicShell from "./PublicShell.vue";
 import { usePreferences } from "./preferences";
@@ -47,11 +47,7 @@ async function submit() {
           ><span class="auth-cursor">_</span>
         </h1>
         <p>{{ t("authSideDescription") }}</p>
-        <div class="auth-emblem" aria-hidden="true">
-          <div class="emblem-ring"></div>
-          <div class="emblem-grid"></div>
-          <CordLogo mark-only /><span>CONNECTION / HUMAN</span>
-        </div>
+        <AuthTerminal class="auth-emblem" />
         <div class="story-note"><Icon name="leaf" :size="16" />{{ t("lessNoise") }}</div>
       </section>
       <section class="auth-card" aria-labelledby="auth-heading">
@@ -164,55 +160,7 @@ async function submit() {
   max-width: 330px;
 }
 .auth-emblem {
-  height: 205px;
-  position: relative;
-  overflow: hidden;
-  margin: 20px 0;
-  mask-image: linear-gradient(90deg, transparent, black 15%, black 85%, transparent);
-}
-.emblem-ring {
-  position: absolute;
-  width: 180px;
-  height: 180px;
-  border: 1px solid var(--line);
-  border-radius: 50%;
-  left: 55px;
-  top: 10px;
-}
-.emblem-ring::after {
-  content: "";
-  position: absolute;
-  inset: 22px -27px;
-  border: 1px dashed var(--accent-line);
-  border-radius: 50%;
-  transform: rotate(-30deg);
-}
-.emblem-grid {
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(var(--line) 1px, transparent 1px),
-    linear-gradient(90deg, var(--line) 1px, transparent 1px);
-  background-size: 24px 24px;
-  opacity: 0.2;
-  mask-image: radial-gradient(ellipse, black, transparent 65%);
-}
-.auth-emblem svg {
-  width: 150px;
-  height: 150px;
-  color: var(--green);
-  position: absolute;
-  left: 70px;
-  top: 20px;
-  opacity: 0.7;
-}
-.auth-emblem > span {
-  position: absolute;
-  bottom: 12px;
-  left: 80px;
-  font: 7px var(--mono);
-  letter-spacing: 2px;
-  color: var(--muted);
+  margin: 27px 0 24px;
 }
 .story-note {
   display: flex;

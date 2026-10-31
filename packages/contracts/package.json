@@ -2,5 +2,16 @@
   "name": "@cord/contracts",
   "version": "0.0.0",
   "private": true,
-  "description": "API/event sözleşmeleri ve doğrulama şemaları."
+  "description": "Platform-independent API response contracts.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
 }
