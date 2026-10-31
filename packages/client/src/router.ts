@@ -1,4 +1,5 @@
 import { createRouter, type RouterHistory } from "vue-router";
+import { useSessionStore } from "./session";
 import { usePreferences, type TranslationKey } from "./preferences";
 
 export function createClientRouter(history: RouterHistory) {
@@ -34,6 +35,12 @@ export function createClientRouter(history: RouterHistory) {
       { path: "/:pathMatch(.*)*", redirect: "/" },
     ],
     scrollBehavior: () => ({ top: 0 }),
+  });
+  router.beforeEach(async (to) => {
+    if (to.name !== "dashboard") return true;
+    const session = useSessionStore();
+    if (await session.verify()) return true;
+    return { name: "login" };
   });
   router.afterEach((to) => {
     usePreferences().page = to.meta.title as TranslationKey;

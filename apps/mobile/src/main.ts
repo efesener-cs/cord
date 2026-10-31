@@ -3,11 +3,12 @@ import { createPinia } from "pinia";
 import { createWebHashHistory } from "vue-router";
 import { Capacitor } from "@capacitor/core";
 import { App } from "@capacitor/app";
-import { createClientRouter } from "@cord/client";
+import { configureApi, createClientRouter } from "@cord/client";
 import "@cord/ui/styles.css";
 import "./safe-area.css";
 import Root from "./Root.vue";
 
+configureApi(import.meta.env.VITE_API_URL ?? "");
 const router = createClientRouter(createWebHashHistory());
 document.documentElement.dataset.platform = Capacitor.getPlatform();
 createApp(Root).use(createPinia()).use(router).mount("#app");

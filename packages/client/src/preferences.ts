@@ -3,6 +3,17 @@ import { ref, watch } from "vue";
 
 const translations = {
   tr: {
+    usernameHint: "3–32 karakter: a–z, 0–9, _, . veya -. Harf ya da rakamla başla.",
+    authValidation:
+      "Kullanıcı adı 3–32 karakter (a-z, 0-9, _, ., -), e-posta geçerli, şifre 12–128 karakter olmalı.",
+    authDuplicate: "Bu kullanıcı adı veya e-posta ile bir hesap zaten var.",
+    authInvalid: "Kullanıcı adı veya şifre yanlış. Yeniden giriş yap.",
+    authRateLimit: "Çok fazla deneme yaptın. Biraz sonra tekrar dene.",
+    authNetwork: "Sunucuya ulaşılamadı. Bağlantını kontrol et.",
+    authFailure: "İşlem tamamlanamadı. Biraz sonra tekrar dene.",
+    authPending: "Bekle…",
+    logoutFailed:
+      "Bu cihazdaki oturum kapatıldı ancak sunucuda iptal doğrulanamadı. Oturum en geç 24 saat içinde sona erer.",
     forYou: "Senin için",
     recommendationIntro: "Bir topluluk keşfet ya da yarım kalan sohbetine dön.",
     discoverServer: "TOPLULUĞU KEŞFET",
@@ -57,7 +68,7 @@ const translations = {
     heroDescription:
       "Bir merhaba, saatler süren bir sohbet, birlikte üretilen bir şey. Cord, kendi topluluğunla buluşman için daha sakin bir alan.",
     joinCord: "Kendi köşeni bul",
-    previewNote: "Geliştirme önizlemesi · Henüz gerçek hesap oluşturulmaz.",
+    previewNote: "Geliştirme sürümü · Hesaplar gerçek, mesajlar yerel demo.",
     previewWindow: "CORD / TOPLULUK ÖNİZLEMESİ",
     generalChannel: "genel",
     nightChannel: "gece-sohbeti",
@@ -104,9 +115,9 @@ const translations = {
     haveAccount: "Zaten bir hesabın var mı?",
     createAccount: "Hesap oluştur",
     registrationReceived: "Kayıt alındı. Giriş yapabilirsin.",
-    loginDemo: "Önizleme modu: istediğin kullanıcı adı ve şifreyle devam edebilirsin.",
+    loginDemo: "Kayıtlı hesabınla giriş yap. Oturum bu uygulama penceresinde tutulur.",
     registerDemo:
-      "Bu bir kayıt önizlemesidir. Bilgiler sunucuya gönderilmez ve hesap oluşturulmaz.",
+      "Hesabın sunucuda oluşturulur. Şifren en az 12 karakter olmalı; e-posta doğrulaması henüz yok.",
     signOut: "Çıkış yap",
     demoBadge: "ETKİLEŞİMLİ ÖNİZLEME",
     servers: "Sunucular",
@@ -219,6 +230,17 @@ const translations = {
     local: "YEREL",
   },
   en: {
+    usernameHint: "3–32 characters: a–z, 0–9, _, . or -. Start with a letter or digit.",
+    authValidation:
+      "Use a 3–32 character username (a-z, 0-9, _, ., -), a valid email, and a 12–128 character password.",
+    authDuplicate: "An account with this username or email already exists.",
+    authInvalid: "Invalid username or password. Please sign in again.",
+    authRateLimit: "Too many attempts. Please try again later.",
+    authNetwork: "Could not reach the server. Check your connection.",
+    authFailure: "Could not complete the request. Please try again shortly.",
+    authPending: "Please wait…",
+    logoutFailed:
+      "Signed out on this device, but server revocation could not be confirmed. The session expires within 24 hours.",
     forYou: "For you",
     recommendationIntro: "Discover a community or pick up a conversation.",
     discoverServer: "DISCOVER A COMMUNITY",
@@ -273,7 +295,7 @@ const translations = {
     heroDescription:
       "A hello, a conversation that lasts for hours, something built together. Cord is a calmer space to meet your community.",
     joinCord: "Find your corner",
-    previewNote: "Development preview · No real accounts are created yet.",
+    previewNote: "Development build · Real accounts, local demo messages.",
     previewWindow: "CORD / COMMUNITY PREVIEW",
     generalChannel: "general",
     nightChannel: "late-night",
@@ -320,9 +342,9 @@ const translations = {
     haveAccount: "Already have an account?",
     createAccount: "Create an account",
     registrationReceived: "Registration received. You can now log in.",
-    loginDemo: "Preview mode: continue with any username and password.",
+    loginDemo: "Sign in with your registered account. Your session stays in this app window.",
     registerDemo:
-      "This is a signup preview. Details are not sent to a server and no account is created.",
+      "Your account is created on the server. Use at least 12 password characters; email verification is not available yet.",
     signOut: "Log out",
     demoBadge: "INTERACTIVE PREVIEW",
     servers: "Servers",

@@ -1,9 +1,15 @@
+import { createDatabase } from "@cord/database";
+import { createAuthService } from "./modules/auth/service.ts";
 import { createServer } from "node:http";
 import { createApp } from "./app.ts";
 import { readConfig } from "./config/environment.ts";
 
 const config = readConfig();
-const server = createServer(createApp());
+const database = createDatabase(config.databaseUrl);
+await database.$connect();
+const server = createServer(
+  createApp({ auth: createAuthService(database), allowedOrigins: config.allowedOrigins }),
+);
 server.requestTimeout = 30_000;
 server.headersTimeout = 10_000;
 server.keepAliveTimeout = 5_000;
@@ -30,8 +36,10 @@ function shutdown(): void {
   }, 10_000);
   timeout.unref();
   server.close((error) => {
-    clearTimeout(timeout);
-    process.exitCode = error ? 1 : 0;
+    void database.$disconnect().finally(() => {
+      clearTimeout(timeout);
+      process.exitCode = error ? 1 : 0;
+    });
   });
 }
 process.on("SIGTERM", shutdown);

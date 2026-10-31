@@ -1,15 +1,17 @@
 FROM node:24.22.1-alpine AS base
 WORKDIR /app
-RUN npm install --global pnpm@12.14.0
+RUN apk add --no-cache openssl && npm install --global pnpm@12.14.0
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/api/package.json apps/api/package.json
 COPY packages/contracts/package.json packages/contracts/package.json
+COPY packages/database/package.json packages/database/package.json
 
 FROM base AS development
 RUN pnpm install --frozen-lockfile --filter @cord/api...
 COPY tsconfig.base.json ./
 COPY apps/api apps/api
 COPY packages/contracts packages/contracts
+COPY packages/database packages/database
 ENV HOST=0.0.0.0 PORT=3000
 EXPOSE 3000
 CMD ["pnpm", "--filter", "@cord/api", "dev"]
@@ -22,6 +24,7 @@ ENV NODE_ENV=production HOST=0.0.0.0 PORT=3000
 RUN pnpm install --prod --frozen-lockfile --filter @cord/api...
 COPY --from=build /app/apps/api/dist apps/api/dist
 COPY --from=build /app/packages/contracts/dist packages/contracts/dist
+COPY --from=build /app/packages/database/dist packages/database/dist
 USER node
 EXPOSE 3000
 CMD ["node", "apps/api/dist/server.js"]

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ApiError } from "@cord/sdk";
 import { computed, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import AuthTerminal from "./AuthTerminal.vue";
@@ -14,6 +15,9 @@ const username = ref("");
 const email = ref("");
 const password = ref("");
 const showPassword = ref(false);
+const pending = ref(false);
+const errorMessage = ref("");
+const registered = computed(() => router.currentRoute.value.query.registered === "1");
 const isRegister = computed(() => props.mode === "register");
 watch(
   () => props.mode,
@@ -22,18 +26,44 @@ watch(
     email.value = "";
     password.value = "";
     showPassword.value = false;
+    errorMessage.value = "";
   },
 );
 async function submit() {
-  if (isRegister.value) {
-    window.alert(t("registrationReceived"));
-    email.value = "";
-    password.value = "";
-    await router.push("/login");
-  } else {
-    session.enter(username.value);
-    password.value = "";
-    await router.push("/dashboard");
+  if (pending.value) return;
+  pending.value = true;
+  errorMessage.value = "";
+  try {
+    if (isRegister.value) {
+      await session.register({
+        username: username.value,
+        email: email.value,
+        password: password.value,
+      });
+      password.value = "";
+      await router.push({ path: "/login", query: { registered: "1" } });
+    } else {
+      await session.login({ username: username.value, password: password.value });
+      password.value = "";
+      await router.push("/dashboard");
+    }
+  } catch (error) {
+    const code = error instanceof ApiError ? error.code : "INTERNAL_ERROR";
+    errorMessage.value = t(
+      code === "VALIDATION_ERROR"
+        ? "authValidation"
+        : code === "ACCOUNT_EXISTS"
+          ? "authDuplicate"
+          : code === "INVALID_CREDENTIALS" || code === "UNAUTHORIZED"
+            ? "authInvalid"
+            : code === "RATE_LIMITED"
+              ? "authRateLimit"
+              : code === "NETWORK_ERROR"
+                ? "authNetwork"
+                : "authFailure",
+    );
+  } finally {
+    pending.value = false;
   }
 }
 </script>
@@ -59,7 +89,18 @@ async function submit() {
         <p class="auth-description">
           {{ t(isRegister ? "registerDescription" : "loginDescription") }}
         </p>
-        <form @submit.prevent="submit">
+        <p
+          v-if="router.currentRoute.value.query.logoutFailed === '1'"
+          class="auth-feedback"
+          role="alert"
+        >
+          {{ t("logoutFailed") }}
+        </p>
+        <p v-if="registered && !isRegister" class="auth-feedback" role="status">
+          {{ t("registrationReceived") }}
+        </p>
+        <p v-if="errorMessage" class="auth-feedback" role="alert">{{ errorMessage }}</p>
+        <form :aria-busy="pending" @submit.prevent="submit">
           <div class="field">
             <label for="username">{{ t("username") }}</label
             ><input
@@ -68,11 +109,16 @@ async function submit() {
               name="username"
               type="text"
               autocomplete="username"
+              aria-describedby="username-hint"
               :placeholder="t('usernamePlaceholder')"
               maxlength="32"
+              minlength="3"
+              pattern="[A-Za-z0-9][A-Za-z0-9_.-]{2,31}"
+              :disabled="pending"
               required
             />
           </div>
+          <p id="username-hint" class="field-hint">{{ t("usernameHint") }}</p>
           <div v-if="isRegister" class="field">
             <label for="email">{{ t("email") }}</label
             ><input
@@ -80,6 +126,8 @@ async function submit() {
               v-model="email"
               name="email"
               type="email"
+              maxlength="254"
+              :disabled="pending"
               autocomplete="email"
               :placeholder="t('emailPlaceholder')"
               required
@@ -92,6 +140,9 @@ async function submit() {
                 id="password"
                 v-model="password"
                 name="password"
+                :minlength="isRegister ? 12 : 1"
+                maxlength="128"
+                :disabled="pending"
                 :type="showPassword ? 'text' : 'password'"
                 :autocomplete="isRegister ? 'new-password' : 'current-password'"
                 :placeholder="t('passwordPlaceholder')"
@@ -106,8 +157,9 @@ async function submit() {
               </button>
             </div>
           </div>
-          <button type="submit" class="public-button auth-submit">
-            {{ t(isRegister ? "createAccount" : "login") }}<Icon name="arrow" :size="18" />
+          <button type="submit" class="public-button auth-submit" :disabled="pending">
+            {{ t(pending ? "authPending" : isRegister ? "createAccount" : "login")
+            }}<Icon name="arrow" :size="18" />
           </button>
         </form>
         <div class="auth-alternate">
@@ -338,5 +390,25 @@ async function submit() {
   .auth-back {
     padding: 0 20px 30px;
   }
+}
+
+.field-hint {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.7;
+  margin: 7px 0 0;
+}
+.auth-feedback {
+  color: var(--green);
+  border: 1px solid var(--accent-line);
+  background: var(--active);
+  padding: 12px;
+  border-radius: 5px;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.auth-submit:disabled {
+  opacity: 0.65;
+  cursor: wait;
 }
 </style>

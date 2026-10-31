@@ -2,5 +2,29 @@
   "name": "@cord/database",
   "version": "0.0.0",
   "private": true,
-  "description": "Yalnızca sunucuda kullanılan veri erişimi ve migration dosyaları."
+  "description": "Server-only Prisma data access and migrations.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "generate": "prisma generate --config prisma7.config.ts",
+    "build": "pnpm generate && tsc -p tsconfig.json",
+    "typecheck": "pnpm generate && tsc --noEmit -p tsconfig.json",
+    "migrate:deploy": "prisma migrate deploy --config prisma7.config.ts",
+    "migrate:dev": "prisma migrate dev --config prisma7.config.ts"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "7.10.1",
+    "@prisma/client": "7.10.1",
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.23.1",
+    "dotenv": "^18.0.9",
+    "prisma": "7.10.1"
+  }
 }

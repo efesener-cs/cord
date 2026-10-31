@@ -25,3 +25,4 @@ node_modules
 
 # Local implementation reports and planning notes.
 /result/
+packages/database/src/generated

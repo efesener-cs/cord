@@ -2,7 +2,7 @@
 
 ## Backend
 
-The first runnable backend slice is an independent Express 5/TypeScript application in `apps/api`, with `/api/v1/health`, validated environment configuration, request IDs, bounded JSON parsing, redacted JSON errors/logging, and graceful HTTP shutdown. It does not connect to the database or implement authentication/business resources yet. The process listens on port 3000 inside Compose and is mapped to host loopback port 3001. Caddy and Vite proxy `/api` without rewriting the prefix; frontend `/dashboard` and API `/api/v1/...` are separate route spaces. See [api.md](api.md).
+The first runnable backend slice is an independent Express 5/TypeScript application in `apps/api`, with `/api/v1/health`, validated environment configuration, request IDs, bounded JSON parsing, redacted JSON errors/logging, and graceful HTTP shutdown. It now connects to PostgreSQL through Prisma and implements registration, login, logout, and current-user lookup. Other business resources remain deferred. The process listens on port 3000 inside Compose and is mapped to host loopback port 3001. Caddy and Vite proxy `/api` without rewriting the prefix; frontend `/dashboard` and API `/api/v1/...` are separate route spaces. See [api.md](api.md).
 
 The backend uses Express and TypeScript as a modular monolith. Auth, users, guilds, channels, messages, and realtime modules belong to the same API application. Separate microservices or an additional gateway service are not needed initially.
 
@@ -24,9 +24,9 @@ The Electron main/preload and renderer sources now build under `apps/desktop`. T
 
 ## Frontend routing and state
 
-`packages/client/src/router.ts` defines the public landing, registration, login, and dashboard routes. `apps/web` supplies `createWebHistory()` and mounts the router with Pinia. Electron and Capacitor adapters use `createWebHashHistory()` with the same routes, avoiding local-file path rewriting. Route components load lazily. Navigation is a client-side UI flow; the preview has no auth guards, server sessions, or account API.
+`packages/client/src/router.ts` defines the public landing, registration, login, and dashboard routes. `apps/web` supplies `createWebHistory()` and mounts the router with Pinia. Electron and Capacitor adapters use `createWebHashHistory()` with the same routes, avoiding local-file path rewriting. Route components load lazily. Dashboard navigation verifies the server-side Bearer session via the SDK; unauthenticated navigation returns to login. API endpoints independently enforce authentication.
 
-The minimal session store contains only the display name. Preferences and local demo messages use separate Pinia stores; form fields and view-specific state remain local refs. Registration currently alerts and navigates to login; login accepts arbitrary nonempty credentials and opens the dashboard. This must be replaced by server-side authentication before real accounts or private data are introduced.
+The session store contains the public user and a memory-only opaque Bearer token. Preferences and local demo messages use separate Pinia stores; form fields and view-specific state remain local refs. Registration creates a real account and navigates to login; login validates credentials and creates a 24-hour, database-backed, revocable session. Only token digests are stored server-side. Refresh/restart loses the client token. Local messages and other demo data remain separate from account persistence.
 
 ## Package boundaries
 
@@ -39,11 +39,13 @@ api -> contracts
     -> database -> PostgreSQL
 ```
 
-`contracts` now contains the initial public health/error response types and will also contain runtime validation schemas; TypeScript types alone do not replace server-side validation. Client packages must not import `database` or server secrets.
+`contracts` contains health/error types, public account/session types, and Zod request/response validation schemas; TypeScript types alone do not replace server-side validation. Client packages must not import `database` or server secrets.
 
-Zod is a candidate for runtime validation of HTTP requests and Socket.IO events; it has not been added as a dependency. For example, a schema can check that message content is text and stays within its length limit. Schemas may be shared with clients, but the server must always validate incoming data independently.
+Zod is installed for account HTTP validation and SDK response parsing. Future Socket.IO payloads also require server-side validation. For example, a schema can check that message content is text and stays within its length limit. Schemas may be shared with clients, but the server must always validate incoming data independently.
 
 ## Data and infrastructure
+
+Prisma 7.10.1 with its PostgreSQL adapter implements User and Session data access in the server-only `packages/database` boundary. Schema and additive migrations are committed; generated client output is ignored. A one-shot Compose migration service applies migrations before API startup. Keep database access out of client packages.
 
 PostgreSQL is the primary data store for users, guilds, memberships, roles, channels, and messages. JSONB can be used for flexible metadata when needed. MongoDB is not introduced as a second data store initially.
 
@@ -53,11 +55,11 @@ Redis can be added when multiple API instances, distributed presence, rate limit
 
 The base Compose `web` service builds Vue assets in a Node/pnpm stage and serves only the resulting static files from a Caddy runtime. It uses host loopback port 8081 by default, independently of the `web-dev` Vite service on port 5173. Caddy provides SPA fallback, compression, cache headers, and static-server health checking. Versioned HTTP API proxying is implemented. Public HTTPS and WebSocket proxying remain future production deployment work. See [self-hosting.md](self-hosting.md).
 
-Development PostgreSQL maps host port 5433 to container port 5432. Containers use `postgres:5432`, while host clients use `127.0.0.1:5433`; the initial API does not yet consume a database connection URL.
+Development PostgreSQL maps host port 5433 to container port 5432. Containers use `postgres:5432`, while host clients use `127.0.0.1:5433`; the API consumes a server-only `DATABASE_URL`. Compose constructs its internal URL; host commands use the root `.env` host URL.
 
 ## Toolchain
 
-pnpm manages workspace packages. Vite+ handles browser development and builds using `apps/web/vite.config.ts`; `vue-tsc` checks Vue and TypeScript sources against the root `tsconfig.json`. No extra monorepo orchestrator is used. API Vitest scripts are configured through Vite+ in `apps/api/vite.config.ts`; test cases are being handled separately by the user and are not included yet. Lint scripts are not configured. The Express API uses its own strict NodeNext TypeScript build configuration; it shares no client DOM types.
+pnpm manages workspace packages. Vite+ handles browser development and builds using `apps/web/vite.config.ts`; `vue-tsc` checks Vue and TypeScript sources against the root `tsconfig.json`. No extra monorepo orchestrator is used. API Vitest scripts are configured through Vite+ in `apps/api/vite.config.ts`; eight account/session integration tests are implemented and require a dedicated migrated `TEST_DATABASE_URL`. Tests are skipped when it is not provided. Lint scripts are not configured. The Express API uses its own strict NodeNext TypeScript build configuration; it shares no client DOM types.
 
 `tsconfig.base.json` defines shared strict checking options only. The root `tsconfig.json` currently configures DOM/Node types, bundler module resolution, and no-emit checking for browser and shared Vue sources. Backend and native targets will require separate configurations.
 

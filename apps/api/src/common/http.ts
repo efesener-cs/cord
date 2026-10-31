@@ -2,6 +2,16 @@ import { randomUUID } from "node:crypto";
 import type { ErrorRequestHandler, RequestHandler } from "express";
 import type { ApiErrorCode, ApiErrorResponse } from "@cord/contracts";
 
+export class HttpError extends Error {
+  readonly status: number;
+  readonly code: ApiErrorCode;
+  constructor(status: number, code: ApiErrorCode, message: string) {
+    super(message);
+    this.status = status;
+    this.code = code;
+  }
+}
+
 export const requestContext: RequestHandler = (request, response, next) => {
   // Generate our own ID; do not trust arbitrary inbound identifiers.
   const requestId = randomUUID();
@@ -42,7 +52,9 @@ export const handleError: ErrorRequestHandler = (error: unknown, _request, respo
   const type =
     typeof error === "object" && error !== null && "type" in error ? error.type : undefined;
   const requestId = String(response.locals.requestId);
-  if (type === "entity.parse.failed") {
+  if (error instanceof HttpError) {
+    response.status(error.status).json(errorBody(error.code, error.message, requestId));
+  } else if (type === "entity.parse.failed") {
     response
       .status(400)
       .json(errorBody("INVALID_JSON", "Request body must be valid JSON.", requestId));

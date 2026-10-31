@@ -2,6 +2,7 @@
 import { computed, nextTick, ref, watch } from "vue";
 import Icon from "@cord/ui/CordIcon.vue";
 import CordLogo from "@cord/ui/CordLogo.vue";
+import { ApiError } from "@cord/sdk";
 import { friends, servers, type Friend } from "./demo";
 import { useDemoStore } from "./store";
 import { useSessionStore } from "./session";
@@ -22,10 +23,21 @@ const displayName = computed(() => session.username || t("user"));
 const avatarInitial = computed(() =>
   displayName.value.slice(0, 1).toLocaleUpperCase(preferences.locale),
 );
-function signOut() {
-  session.clear();
+const signOutPending = ref(false);
+const signOutError = ref(false);
+async function signOut() {
+  if (signOutPending.value) return;
+  signOutPending.value = true;
+  signOutError.value = false;
+  try {
+    await session.logout();
+  } catch (error) {
+    signOutError.value = !(error instanceof ApiError && error.status === 401);
+  } finally {
+    signOutPending.value = false;
+  }
   store.reset();
-  void router.push("/login");
+  void router.push({ path: "/login", query: signOutError.value ? { logoutFailed: "1" } : {} });
 }
 const section = ref("home");
 const filter = ref("online");
@@ -295,7 +307,12 @@ function submitFriend() {
           }}</strong>
         </div>
         <div class="topbar-right">
-          <button :aria-label="t('signOut')" :title="t('signOut')" @click="signOut">
+          <button
+            :aria-label="t('signOut')"
+            :title="t('signOut')"
+            :disabled="signOutPending"
+            @click="signOut"
+          >
             <Icon name="exit" :size="18" />
           </button>
           <AppearanceControls />

@@ -9,6 +9,7 @@ services:
     volumes:
       - ./apps/api/src:/app/apps/api/src
       - ./packages/contracts/src:/app/packages/contracts/src
+      - ./packages/database/src:/app/packages/database/src
 
   web-dev:
     build:
@@ -23,6 +24,8 @@ services:
       - ./apps/web/vite.config.ts:/app/apps/web/vite.config.ts
       - ./packages/client/src:/app/packages/client/src
       - ./packages/ui/src:/app/packages/ui/src
+      - ./packages/sdk/src:/app/packages/sdk/src
+      - ./packages/contracts/src:/app/packages/contracts/src
     environment:
       API_PROXY_TARGET: http://api:3000
     depends_on:

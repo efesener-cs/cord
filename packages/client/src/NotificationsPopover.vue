@@ -103,15 +103,18 @@ onBeforeUnmount(() => document.removeEventListener("pointerdown", outside));
 }
 .notice-count {
   position: absolute;
-  right: -4px;
-  top: -2px;
-  font: 8px var(--mono);
+  right: -5px;
+  top: -4px;
+  display: grid;
+  place-items: center;
+  font: 600 11px/1 var(--mono);
   background: var(--green);
   color: var(--on-accent);
   border: 2px solid var(--bg);
-  border-radius: 8px;
-  min-width: 16px;
-  padding: 1px 3px;
+  border-radius: 12px;
+  min-width: 20px;
+  min-height: 20px;
+  padding: 2px 4px;
 }
 .notification-panel {
   position: absolute;

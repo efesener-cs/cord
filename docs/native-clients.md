@@ -2,7 +2,7 @@
 
 The Electron and Capacitor adapters mount the existing shared Vue client. They contain platform integration rather than copies of the screens. The dashboard overview is labeled **Genel bakış / Overview**.
 
-The source is TypeScript (including a `.cts` preload); builds produce JavaScript. Native projects were generated with the installed Capacitor CLI. These are runnable development shells for the UI preview, not signed installers, an authenticated service, or complete native integrations.
+The source is TypeScript (including a `.cts` preload); builds produce JavaScript. Native projects were generated with the installed Capacitor CLI. These are runnable development shells for the UI preview, not signed installers or complete native integrations. Account forms now use the real API, while messaging remains local demo content.
 
 ## Shared setup
 
@@ -48,7 +48,7 @@ Files:
 | `apps/desktop/scripts/start.ts` | Cross-platform runtime launch and signal forwarding |
 | `apps/desktop/tsconfig.main.json` | Strict Node-target main/preload compilation |
 
-The renderer has `nodeIntegration: false`, `contextIsolation: true`, and `sandbox: true`. It does not import Electron. There is no unrestricted IPC or filesystem API. New windows and navigation away from the bundled renderer are denied. Native permissions are denied because the current UI does not implement calls, notifications, or media capture. The renderer CSP allows bundled scripts/styles and blocks network connections; revise it deliberately when the backend is integrated.
+The renderer has `nodeIntegration: false`, `contextIsolation: true`, and `sandbox: true`. It does not import Electron. There is no unrestricted IPC or filesystem API. New windows and navigation away from the bundled renderer are denied. Native permissions are denied because the current UI does not implement calls, notifications, or media capture. The renderer CSP allows bundled scripts/styles and exactly the configured API origin. Electron defaults to `http://127.0.0.1:3001`. Start the API stack before registering/logging in. Set `VITE_API_URL` to an HTTP(S) origin without a trailing slash when building for another server; the Vite adapter updates both the SDK configuration and CSP. The local API explicitly permits the `null` file origin via `API_ALLOWED_ORIGINS`; do not carry that allowance into an unrelated public web deployment.
 
 The main/preload outputs are `apps/desktop/dist/main/index.js` and `apps/desktop/dist/preload/index.cjs`; the shared client is built into `apps/desktop/dist/renderer`. Installer packaging, application signing, auto-updates, tray integration, native notifications, and release icons are not configured.
 
@@ -165,9 +165,9 @@ Choose a simulator in Xcode and run. A real device also needs an appropriate sig
 
 ## Manual checks
 
-On each native target, try signup/login with arbitrary nonempty preview credentials and confirm that the name reaches the dashboard. Switch themes and languages, open a direct-message conversation, and send enough local messages to require scrolling. The message composer and application chrome should remain visible while messages scroll. Check narrow and short windows, keyboard focus, mobile safe areas/keyboard behavior, Android back navigation, and restart behavior. State is intentionally in memory and resets when the app restarts.
+On the desktop, start the API stack, register an account using a 3–32 character ASCII username and a password of at least 12 characters, then log in and confirm the server-returned name reaches the dashboard. Incorrect credentials must fail. For Capacitor native builds, first configure a reachable `VITE_API_URL`, exact API CORS origin, and platform TLS/network settings; localhost in an emulator is not the host machine. Native auth integration has not been verified. The mobile browser preview at port 5175 uses its Vite API proxy. Switch themes and languages, open a direct-message conversation, and send enough local messages to require scrolling. The message composer and application chrome should remain visible while messages scroll. Check narrow and short windows, keyboard focus, mobile safe areas/keyboard behavior, Android back navigation, and restart behavior. State is intentionally in memory and resets when the app restarts.
 
-Native launcher icons and splash screens currently come from the generated Capacitor templates; `resources/` directories remain reserved for reviewed native branding. Backend authentication, real network messaging, push notifications, microphone/camera access, app links, secure credential storage, release signing, and store distribution are separate future work.
+Native launcher icons and splash screens currently come from the generated Capacitor templates; `resources/` directories remain reserved for reviewed native branding. Real network messaging, push notifications, microphone/camera access, app links, secure credential storage, release signing, and store distribution are separate future work.
 
 ## Recent verification
 

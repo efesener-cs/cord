@@ -21,6 +21,19 @@ services:
       retries: 3
       start_period: 5s
 
+  migrate:
+    build:
+      context: .
+      dockerfile: infra/docker/api.Dockerfile
+      target: development
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-cord}:${POSTGRES_PASSWORD:-cord}@postgres:5432/${POSTGRES_DB:-cord}
+    command: ["pnpm", "db:migrate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
   api:
     build:
       context: .
@@ -30,6 +43,12 @@ services:
       NODE_ENV: production
       HOST: 0.0.0.0
       PORT: "3000"
+      DATABASE_URL: postgresql://${POSTGRES_USER:-cord}:${POSTGRES_PASSWORD:-cord}@postgres:5432/${POSTGRES_DB:-cord}
+      # Explicit file-origin allowance for the local Electron preview; remove for public hosting.
+      API_ALLOWED_ORIGINS: ${API_ALLOWED_ORIGINS-null}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     ports:
       - "127.0.0.1:${API_PORT:-3001}:3000"
     init: true

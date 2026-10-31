@@ -8,6 +8,8 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@cord/contracts": "workspace:*",
+    "@cord/sdk": "workspace:*",
     "@cord/ui": "workspace:*",
     "pinia": "^3.0.0",
     "vue": "^3.5.0",
