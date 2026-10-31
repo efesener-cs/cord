@@ -2,5 +2,18 @@
   "name": "@cord/web",
   "version": "0.0.0",
   "private": true,
-  "description": "Vue tarayıcı girişi."
+  "description": "Vue taray\u0131c\u0131 giri\u015fi.",
+  "type": "module",
+  "scripts": {
+    "dev": "vp dev",
+    "build": "vp build",
+    "preview": "vp preview --host 0.0.0.0"
+  },
+  "dependencies": {
+    "@cord/client": "workspace:*",
+    "@cord/ui": "workspace:*",
+    "vue": "^3.5.0",
+    "vue-router": "^4.6.0",
+    "pinia": "^3.0.0"
+  }
 }

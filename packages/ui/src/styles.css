@@ -1,0 +1,155 @@
+:root {
+  color-scheme: dark;
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --bg: #0e0f0f;
+  --rail: #090a0a;
+  --sidebar: #141616;
+  --panel: #1c1e1d;
+  --surface: #242725;
+  --raised: #2c2f2c;
+  --hover: #2c302c;
+  --line: #333733;
+  --text: #e0ded3;
+  --muted: #a6aaa0;
+  --green: #a8bd8b;
+  --amber: #d8ae76;
+  --active: #293126;
+  --active-hover: #374232;
+  --accent-line: #4d5d42;
+  --on-accent: #151b12;
+  --brand-dot: #4f653d;
+  --welcome-footer: #181b19;
+  --overlay: #050706d9;
+  --shadow: #00000080;
+  --card-shadow: #00000030;
+  --danger: #d58c82;
+  --danger-bg: #422b29;
+  --idle: #d3af77;
+  --offline: #737a73;
+  --sage-bg: #394635;
+  --sage-text: #c9d6a9;
+  --amber-bg: #50432e;
+  --amber-text: #e5c68c;
+  --blue-bg: #344747;
+  --blue-text: #b3d1c6;
+  --rose-bg: #503b3e;
+  --rose-text: #e3b5af;
+  --purple-bg: #423a4a;
+  --purple-text: #c6b8d3;
+  --art-ink: #9db582;
+  --art-glow: #9bbd7320;
+  --art-orbit: #adc58128;
+  --art-scan: #a8c78a05;
+  --album-bg: #362622;
+  --album-orange: #bd6848;
+  --album-yellow: #d3a34b;
+  --album-green: #6b8259;
+  --album-red: #af463c;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f6f3eb;
+  --rail: #e8e4d9;
+  --sidebar: #eeebe2;
+  --panel: #fffdf7;
+  --surface: #eae8df;
+  --raised: #e1e0d6;
+  --hover: #e2e4d8;
+  --line: #d5d7ca;
+  --text: #30382e;
+  --muted: #626b5b;
+  --green: #506d3e;
+  --amber: #86602a;
+  --active: #dce4cf;
+  --active-hover: #cddbbd;
+  --accent-line: #a4b794;
+  --on-accent: #fffdf5;
+  --brand-dot: #d3e1be;
+  --welcome-footer: #f0f1e7;
+  --overlay: #242c2666;
+  --shadow: #30382e26;
+  --card-shadow: #4945330c;
+  --danger: #9c473b;
+  --danger-bg: #f3ded6;
+  --idle: #9b722a;
+  --offline: #858b7f;
+  --sage-bg: #dbe5cd;
+  --sage-text: #445c32;
+  --amber-bg: #f0dfbc;
+  --amber-text: #75521f;
+  --blue-bg: #d4e5df;
+  --blue-text: #355f56;
+  --rose-bg: #eedbd7;
+  --rose-text: #854f4e;
+  --purple-bg: #e1dcea;
+  --purple-text: #66517a;
+  --art-ink: #657d4e;
+  --art-glow: #7f985620;
+  --art-orbit: #657d4e30;
+  --art-scan: #61784808;
+  --album-bg: #362622;
+  --album-orange: #bd6848;
+  --album-yellow: #d3a34b;
+  --album-green: #6b8259;
+  --album-red: #af463c;
+}
+
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+body {
+  margin: 0;
+  min-width: 360px;
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+button,
+input,
+textarea {
+  font: inherit;
+}
+button {
+  color: inherit;
+  cursor: pointer;
+}
+button,
+input,
+textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 4px;
+}
+button {
+  border: 0;
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+::selection {
+  color: var(--on-accent);
+  background: var(--green);
+}
+button,
+a {
+  touch-action: manipulation;
+}

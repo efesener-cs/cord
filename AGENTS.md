@@ -4,7 +4,7 @@
 
 Cord is a self-hostable, Discord-like communication platform organized as a pnpm monorepo. Read `README.md` and `docs/architecture.md` before changing package boundaries or technology choices.
 
-The repository currently contains a scaffold, configuration, documentation, and a development PostgreSQL Compose service. Application source code and framework dependencies have not been added. Do not describe planned features or commands as implemented. Add application code or dependencies when the user's task calls for implementation.
+The repository includes a runnable Vue frontend with a public landing page, registration/login previews, a communication dashboard, session-only local messages, dark/light themes, and a manual Turkish/English switch. Development Compose supports the web client and PostgreSQL. The preview login only stores a display name; it is not authentication. Electron and Capacitor development adapters are present, with generated Android/iOS sources; see `docs/native-clients.md` before native changes. Native device behavior and release distribution still need validation. The API, authentication, real messaging, voice, and database schema are deferred. Do not describe planned features or commands as implemented.
 
 ## Language and tooling
 
@@ -24,6 +24,10 @@ The repository currently contains a scaffold, configuration, documentation, and 
 - Database: PostgreSQL. ORM selection is pending.
 - Zod is a validation candidate, not an installed or finalized dependency.
 - Keep Redis, object storage, and WebRTC media infrastructure deferred until required by the task.
+
+## Frontend design
+
+Read `docs/design.md` before changing frontend visuals, branding, layout, scrolling, themes, language controls, or interaction patterns. It is the source of truth for the approved design direction. Reuse the shared logo and semantic color tokens; follow its viewport-shell and independent conversation-scrolling rules. Keep both themes and languages coherent. Update that document when the user approves a new design decision, and distinguish working previews from deferred features.
 
 ## Workspace boundaries
 
@@ -49,6 +53,6 @@ Keep development bind mounts and host ports separate from production deployment 
 
 ## Validation and documentation
 
-For configuration-only changes, run `docker compose --env-file .env.example config --quiet` when Compose is affected, validate modified JSON, and check whitespace with `git diff --check`. Run relevant lint, type, build, or test scripts once they exist. Do not invent successful application checks while the repository has no runnable application.
+For configuration-only changes, run `docker compose --env-file .env.example config --quiet` when Compose is affected, validate modified JSON, and check whitespace with `git diff --check`. For frontend changes, run `pnpm typecheck`, `pnpm build`, and `git diff --check`. For native adapter changes, also run the affected `pnpm desktop:build` or `pnpm mobile:build` and follow `docs/native-clients.md`; distinguish compilation from actual runtime/device verification. Follow the visual and responsive verification guidance in `docs/design.md` when browser access is available, and report any verification limits. Run other relevant checks when configured; do not invent successful checks.
 
 Update `README.md` and the relevant `docs/` files when architecture, setup commands, or deployment behavior changes. Preserve user changes unrelated to the task. Do not force-push or rewrite shared Git history unless explicitly requested.

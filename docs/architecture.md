@@ -18,6 +18,14 @@ Voice, video, and screen sharing require a separate media design involving WebRT
 - Electron main/preload code stays in `apps/desktop`. The renderer uses a limited API explicitly exposed by preload; it does not receive Node access.
 - Capacitor provides the native mobile shell. Ionic Vue is an optional UI library. Mobile notifications, permissions, background behavior, and touch layouts need their own implementation work.
 
+The Electron main/preload and renderer sources now build under `apps/desktop`. The main process loads only bundled assets, keeps the renderer sandboxed with Node disabled, and exposes only the OS name through the preload bridge. The native mobile adapter and Capacitor configuration live in `apps/mobile`, including generated Android and iOS projects, hash routing, safe-area styles, and Android back navigation. Native runtime and distribution validation is documented in [native-clients.md](native-clients.md).
+
+## Frontend routing and state
+
+`packages/client/src/router.ts` defines the public landing, registration, login, and dashboard routes. `apps/web` supplies `createWebHistory()` and mounts the router with Pinia. Electron and Capacitor adapters use `createWebHashHistory()` with the same routes, avoiding local-file path rewriting. Route components load lazily. Navigation is a client-side UI flow; the preview has no auth guards, server sessions, or account API.
+
+The minimal session store contains only the display name. Preferences and local demo messages use separate Pinia stores; form fields and view-specific state remain local refs. Registration currently alerts and navigates to login; login accepts arbitrary nonempty credentials and opens the dashboard. This must be replaced by server-side authentication before real accounts or private data are introduced.
+
 ## Package boundaries
 
 ```text
@@ -41,9 +49,9 @@ Redis can be added when multiple API instances, distributed presence, rate limit
 
 ## Toolchain
 
-pnpm manages workspace packages. Vite+ will handle client development/builds and shared linting, formatting, and tests; an additional monorepo orchestrator is not needed initially. A shared root `vite.config.ts` and application-specific configuration will be added during application setup. The Express API's Node/TypeScript build configuration remains separate from client Vite settings.
+pnpm manages workspace packages. Vite+ handles browser development and builds using `apps/web/vite.config.ts`; `vue-tsc` checks Vue and TypeScript sources against the root `tsconfig.json`. No extra monorepo orchestrator is used. Lint and test scripts are not configured yet. The Express API's Node/TypeScript build configuration remains separate from client Vite settings.
 
-`tsconfig.base.json` defines shared strict checking options only. DOM/Node types, module resolution, and emit settings will be configured in each target application's own tsconfig.
+`tsconfig.base.json` defines shared strict checking options only. The root `tsconfig.json` currently configures DOM/Node types, bundler module resolution, and no-emit checking for browser and shared Vue sources. Backend and native targets will require separate configurations.
 
 ## Official references
 

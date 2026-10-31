@@ -2,5 +2,30 @@
   "name": "@cord/mobile",
   "version": "0.0.0",
   "private": true,
-  "description": "Capacitor kabuğu ve ortak Vue mobil girişi."
+  "description": "Capacitor kabuğu ve ortak Vue mobil girişi.",
+  "dependencies": {
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/app": "^8.1.2",
+    "@capacitor/core": "^8.6.0",
+    "@capacitor/ios": "^8.6.0",
+    "@cord/client": "workspace:*",
+    "@cord/ui": "workspace:*",
+    "vue": "^3.5.0",
+    "pinia": "^3.0.0",
+    "vue-router": "^4.6.4"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.6.0"
+  },
+  "type": "module",
+  "scripts": {
+    "dev": "vp dev",
+    "build": "vp build",
+    "preview": "vp preview --host 127.0.0.1 --port 5175",
+    "add:android": "pnpm build && cap add android",
+    "add:ios": "pnpm build && cap add ios",
+    "sync": "pnpm build && cap sync",
+    "android": "pnpm build && cap sync android && cap run android",
+    "ios": "pnpm build && cap sync ios && cap run ios"
+  }
 }

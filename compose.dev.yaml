@@ -1,0 +1,16 @@
+# Explicit development override: docker compose -f compose.yaml -f compose.dev.yaml up web
+services:
+  web:
+    build:
+      context: .
+      dockerfile: infra/docker/web.Dockerfile
+      target: development
+    ports:
+      - "127.0.0.1:5173:5173"
+    volumes:
+      - ./apps/web/src:/app/apps/web/src
+      - ./apps/web/index.html:/app/apps/web/index.html
+      - ./apps/web/vite.config.ts:/app/apps/web/vite.config.ts
+      - ./packages/client/src:/app/packages/client/src
+      - ./packages/ui/src:/app/packages/ui/src
+    init: true

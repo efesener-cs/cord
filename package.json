@@ -11,6 +11,25 @@
     "infra:up": "docker compose up -d --wait",
     "infra:down": "docker compose down",
     "infra:logs": "docker compose logs -f",
-    "infra:check": "docker compose config --quiet"
+    "infra:check": "docker compose config --quiet",
+    "dev": "pnpm --filter @cord/web dev",
+    "build": "pnpm --filter @cord/web build",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json && pnpm --filter @cord/desktop typecheck:main",
+    "desktop:dev": "pnpm --filter @cord/desktop dev",
+    "desktop:build": "pnpm --filter @cord/desktop build",
+    "mobile:dev": "pnpm --filter @cord/mobile dev",
+    "mobile:build": "pnpm --filter @cord/mobile build",
+    "mobile:add:android": "pnpm --filter @cord/mobile add:android",
+    "mobile:add:ios": "pnpm --filter @cord/mobile add:ios",
+    "mobile:android": "pnpm --filter @cord/mobile android",
+    "mobile:ios": "pnpm --filter @cord/mobile ios",
+    "mobile:sync": "pnpm --filter @cord/mobile sync"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "@vitejs/plugin-vue": "^6.0.10",
+    "typescript": "~5.9.3",
+    "vite-plus": "^1.4.0",
+    "vue-tsc": "^3.3.14"
   }
 }

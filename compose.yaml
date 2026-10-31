@@ -1,7 +1,7 @@
 name: cord
 
-# İlk aşamada yalnızca geliştirme veritabanı.
-# Web/API imajları uygulamalar yazıldığında eklenecek.
+# Base development database service.
+# Add compose.dev.yaml explicitly to run the web frontend.
 services:
   postgres:
     image: postgres:18-alpine

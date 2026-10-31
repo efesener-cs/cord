@@ -1,0 +1,28 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node", "vite-plus/client"],
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true
+  },
+  "include": [
+    "apps/web/**/*.ts",
+    "apps/web/**/*.vue",
+    "packages/client/src/**/*.ts",
+    "packages/client/src/**/*.vue",
+    "packages/ui/src/**/*.ts",
+    "packages/ui/src/**/*.vue",
+    "apps/desktop/src/renderer/**/*.ts",
+    "apps/desktop/src/renderer/**/*.vue",
+    "apps/desktop/vite.config.ts",
+    "apps/mobile/**/*.ts",
+    "apps/mobile/**/*.vue",
+    "apps/desktop/scripts/**/*.ts"
+  ],
+  "exclude": ["**/node_modules/**", "**/dist/**", "apps/mobile/android/**", "apps/mobile/ios/**"]
+}

@@ -19,3 +19,9 @@ apps/mobile/android/.gradle/
 apps/mobile/android/local.properties
 apps/mobile/ios/Pods/
 apps/mobile/ios/**/xcuserdata/
+
+# Native signing material stays outside version control.
+*.jks
+*.keystore
+*.p12
+*.mobileprovision

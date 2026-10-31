@@ -1,8 +1,8 @@
 # Cord
 
-A pnpm monorepo scaffold for a self-hostable, Discord-like communication platform.
+A pnpm monorepo for a self-hostable, Discord-like communication platform.
 
-This repository currently contains the project structure and infrastructure configuration. Application code, framework dependencies, a database schema, and runnable clients/API have not been added. Docker Compose currently provides only a development PostgreSQL service.
+The runnable Vue frontend includes a public landing page, registration and login previews, and the communication dashboard. Header controls switch between dark/light themes and Turkish/English for the current session. Registration shows an alert and opens login. Any nonempty username and password open the dashboard, where a session-only Pinia store supplies the displayed name. This is a UI preview, not authentication; no accounts are created and no credentials are sent to a server. Friends, activity, and local messages are demo data. Electron and Capacitor development shells reuse these screens; Android and iOS projects are generated. The API, real messaging, voice, and database schema are not implemented. Native installers, signing, and device integrations remain incomplete. The base Compose file provides PostgreSQL; an explicit development override adds the web client.
 
 ## Technology choices
 
@@ -18,7 +18,7 @@ This repository currently contains the project structure and infrastructure conf
 | Workspace and tooling | pnpm, Vite+ |
 | Development and self-hosting target | Docker Compose |
 
-These choices describe the intended architecture. Framework dependencies have not been added to the manifests. The ORM will be selected when the database schema is designed.
+The Vue client, Vue Router, Pinia, and Vite+ are installed. Electron and Capacitor dependencies are installed; backend framework dependencies remain deferred. The ORM will be selected when the database schema is designed.
 
 ## Repository layout
 
@@ -38,23 +38,41 @@ docs/
   architecture.md  Package boundaries and architectural decisions
   development.md   Local development and upcoming setup steps
   self-hosting.md  Deployment target and current scope
+  design.md        Approved visual direction, branding, and responsive behavior
+  native-clients.md Desktop/mobile launch, native prerequisites, and verification
 infra/
   docker/          Future application Dockerfiles
   proxy/           Future reverse proxy configuration
 ```
 
-Empty directories are preserved with `.gitkeep` files. Native Android/iOS projects will be generated when Capacitor is set up.
+Remaining empty directories are preserved with `.gitkeep` files. Capacitor-generated Android/iOS sources are under `apps/mobile`; build outputs and copied web assets are ignored.
 
 ## Getting started
 
-The Node version is pinned in `.node-version`, and the pnpm version is pinned in the root `package.json`. Vite+ is the intended toolchain; project-local tooling dependencies have not been added yet.
+Use Node 24.22.1 and pnpm 12.14.0 as pinned in `.node-version` and `package.json`. Run the frontend locally:
 
 ```sh
-cp .env.example .env
-docker compose config --quiet
-docker compose up -d --wait
+pnpm install --frozen-lockfile
+pnpm dev
 ```
 
-These commands start only the database. `docker compose down` preserves the database volume. There are no application `dev`, `build`, `test`, or mobile/desktop packaging commands yet.
+Open http://localhost:5173. Routes are `/` (landing), `/register`, `/login`, and `/dashboard`. Dashboard preview is accessible directly without login. Verify with `pnpm typecheck` and `pnpm build`.
 
-See [architecture](docs/architecture.md), [development](docs/development.md), [self-hosting](docs/self-hosting.md), and [agent instructions](AGENTS.md).
+For container development (no local Node installation required):
+
+```sh
+docker compose --env-file .env.example -f compose.yaml -f compose.dev.yaml up --build web
+```
+
+This starts the web client with source mounts and hot reload, independently of PostgreSQL. The placeholder database credentials are for local development only. To start the database separately, copy `.env.example` to `.env` and run `docker compose up -d --wait`. `docker compose down` preserves database volumes.
+
+For native client development:
+
+```sh
+pnpm desktop:dev
+pnpm mobile:dev
+```
+
+Desktop builds and opens Electron; the mobile command serves the mobile browser entry at http://localhost:5175. To run on an emulator/device, follow [native client setup and tests](docs/native-clients.md). Android/iOS projects are already generated; do not add them a second time.
+
+See [design](docs/design.md), [architecture](docs/architecture.md), [development](docs/development.md), [self-hosting](docs/self-hosting.md), and [agent instructions](AGENTS.md).

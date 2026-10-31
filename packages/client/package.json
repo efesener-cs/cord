@@ -2,5 +2,15 @@
   "name": "@cord/client",
   "version": "0.0.0",
   "private": true,
-  "description": "Paylaşılan Vue ekranları ve uygulama durumu."
+  "description": "Paylaşılan Vue ekranları ve uygulama durumu.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@cord/ui": "workspace:*",
+    "pinia": "^3.0.0",
+    "vue": "^3.5.0",
+    "vue-router": "^4.6.4"
+  }
 }
