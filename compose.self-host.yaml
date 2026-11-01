@@ -1,0 +1,95 @@
+# Standalone self-hosting stack. Supply .env.production (never commit it).
+# docker compose --env-file .env.production -f compose.self-host.yaml up -d --build
+name: cord
+services:
+  web:
+    build:
+      context: .
+      dockerfile: infra/docker/web.Dockerfile
+      target: runtime
+    environment:
+      CORD_DOMAIN: ${CORD_DOMAIN:?Set CORD_DOMAIN}
+      MEDIA_DOMAIN: ${MEDIA_DOMAIN:?Set MEDIA_DOMAIN}
+    volumes:
+      - ./infra/proxy/Caddyfile.production:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+  migrate:
+    build:
+      context: .
+      dockerfile: infra/docker/api.Dockerfile
+      target: development
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-cord}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-cord}
+    command: ["pnpm", "db:migrate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+  api:
+    build:
+      context: .
+      dockerfile: infra/docker/api.Dockerfile
+      target: runtime
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: "3000"
+      DATABASE_URL: postgresql://${POSTGRES_USER:-cord}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-cord}
+      COOKIE_SECURE: "true"
+      API_WEB_ORIGINS: https://${CORD_DOMAIN:?Set CORD_DOMAIN}
+      API_ALLOWED_ORIGINS: ${API_ALLOWED_ORIGINS:-https://localhost,capacitor://localhost}
+      UPLOAD_DIRECTORY: /app/data/uploads
+      LIVEKIT_URL: wss://${MEDIA_DOMAIN:?Set MEDIA_DOMAIN}
+      LIVEKIT_INTERNAL_URL: http://media:7880
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?Set LIVEKIT_API_KEY}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?Set LIVEKIT_API_SECRET}
+    volumes:
+      - uploads-data:/app/data/uploads
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    init: true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:3000/api/v1/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cord}
+      POSTGRES_USER: ${POSTGRES_USER:-cord}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  media:
+    image: livekit/livekit-server:v1.13.11
+    command: ["--config", "/etc/livekit.yaml", "--keys", "${LIVEKIT_API_KEY:?Set LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET:?Set LIVEKIT_API_SECRET}"]
+    volumes:
+      - ./infra/media/livekit.self-host.yaml:/etc/livekit.yaml:ro
+    ports:
+      - "7881:7881"
+      - "7882:7882/udp"
+      - "3478:3478/udp"
+    restart: unless-stopped
+volumes:
+  postgres-data:
+  uploads-data:
+  caddy-data:
+  caddy-config:

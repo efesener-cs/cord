@@ -45,7 +45,17 @@ services:
       PORT: "3000"
       DATABASE_URL: postgresql://${POSTGRES_USER:-cord}:${POSTGRES_PASSWORD:-cord}@postgres:5432/${POSTGRES_DB:-cord}
       # Explicit file-origin allowance for the local Electron preview; remove for public hosting.
-      API_ALLOWED_ORIGINS: ${API_ALLOWED_ORIGINS-null}
+      API_ALLOWED_ORIGINS: ${API_ALLOWED_ORIGINS-null,https://localhost,capacitor://localhost}
+      # Local HTTP preview only; use true with HTTPS outside loopback.
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      API_WEB_ORIGINS: ${API_WEB_ORIGINS:-http://localhost:8081,http://127.0.0.1:8081,http://localhost:5173,http://127.0.0.1:5173,http://localhost:5175,http://127.0.0.1:5175}
+      UPLOAD_DIRECTORY: /app/data/uploads
+      LIVEKIT_URL: ${LIVEKIT_URL:-ws://localhost:7880}
+      LIVEKIT_INTERNAL_URL: http://media:7880
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-cord-local}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-local-development-media-secret-change-before-sharing}
+    volumes:
+      - uploads-data:/app/data/uploads
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -59,6 +69,17 @@ services:
       timeout: 3s
       retries: 3
       start_period: 5s
+
+  media:
+    image: livekit/livekit-server:v1.13.11
+    command: ["--config", "/etc/livekit.yaml", "--keys", "${LIVEKIT_API_KEY:-cord-local}: ${LIVEKIT_API_SECRET:-local-development-media-secret-change-before-sharing}"]
+    volumes:
+      - ./infra/media/livekit.local.yaml:/etc/livekit.yaml:ro
+    ports:
+      - "127.0.0.1:7880:7880"
+      - "127.0.0.1:7881:7881"
+      - "127.0.0.1:7882:7882/udp"
+    restart: unless-stopped
 
   postgres:
     image: postgres:18-alpine
@@ -79,4 +100,5 @@ services:
       start_period: 10s
 
 volumes:
+  uploads-data:
   postgres-data:

@@ -4,7 +4,11 @@
 
 Cord is a self-hostable, Discord-like communication platform organized as a pnpm monorepo. Read `README.md` and `docs/architecture.md` before changing package boundaries or technology choices.
 
-The repository includes a runnable Vue frontend with a public landing page, real registration/login, a communication dashboard, session-only local messages, dark/light themes, and a manual Turkish/English switch. Base Compose serves the bundled frontend with Caddy on localhost:8081 and development PostgreSQL on localhost:5433. The development override adds the separate Vite `web-dev` service on localhost:5173. Accounts and 24-hour revocable Bearer sessions are persisted through Prisma; the token stays only in memory and dashboard navigation verifies it with `/users/me`. Electron and Capacitor development adapters are present, with generated Android/iOS sources; see `docs/native-clients.md` before native changes. Native device behavior and release distribution still need validation. The separate Express API foundation exposes `/api/v1/health` with validated configuration and JSON errors on host port 3001 (container 3000); Caddy/Vite proxy `/api` paths. The `migrate` service applies committed User/Session migrations before API startup. Real messaging, voice, and business resource schemas remain deferred. Read `docs/api.md` before backend changes. Do not describe planned features or commands as implemented.
+The repository includes a shared Vue frontend with public landing/auth screens and a dashboard wired to persistent servers, channels, invitation-based memberships, friendships, DMs, message history, attachments, notifications, and account preferences. Express/Prisma stores accounts and 24-hour revocable opaque sessions; web uses HttpOnly cookies/CSRF, Electron uses an origin-bound main-process vault with automatic OS encryption or explicit no-keyring plaintext consent, and native Capacitor uses KeyStore/Keychain-backed storage. Socket.IO handles message delivery, friend presence, typing, and change notifications; HTTP remains authoritative. LiveKit is the separate media plane for calls/video and supported browser/desktop screen capture. Android MediaProjection screen-sharing and optional FCM push adapters are present but unverified; FCM needs operator provider files and is disabled by default. iOS ReplayKit/APNs, configurable roles, and store distribution remain outside this Android-first local package scope. Do not describe those as implemented.
+
+Base Compose serves Caddy on localhost:8081, Express on localhost:3001, development PostgreSQL on localhost:5433, and local LiveKit signaling on localhost:7880; uploads and PostgreSQL have separate persistent volumes. The development override adds Vite on localhost:5173. `compose.self-host.yaml` is a standalone domain/TLS deployment configuration with no published API/database ports. Its runtime/networking still needs operator validation. The migration service applies committed migrations before API startup; never reset valuable data or delete volumes without explicit instructions. Read `docs/api.md` before backend changes and `docs/native-clients.md` before native changes.
+
+The user explicitly assigned tests, builds, configuration checks, browser/device verification, and package/runtime verification for the communication slice to themselves. Implementation/generation is not a passing test result. See `docs/verification.md` for the handoff; do not claim successful latest-slice verification or signed releases.
 
 ## Language and tooling
 
@@ -23,7 +27,7 @@ The repository includes a runnable Vue frontend with a public landing page, real
 - Mobile: Capacitor using the shared Vue client. Ionic Vue components are optional.
 - Database: PostgreSQL with Prisma 7.10.1 and the PostgreSQL adapter in `packages/database`. Keep CLI/client/adapter versions aligned; the generated client is ignored.
 - Zod validates shared account request schemas on the server and response contracts in the SDK.
-- Keep Redis, object storage, and WebRTC media infrastructure deferred until required by the task.
+- LiveKit is the current separate media SFU. Keep Redis/distributed API adapters and object storage deferred until required.
 
 ## Frontend design
 

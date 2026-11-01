@@ -1,33 +1,56 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import Icon from "@cord/ui/CordIcon.vue";
-import { useDemoStore } from "./store";
-import { usePreferences } from "./preferences";
-const emit = defineEmits<{ openDm: [friendId: string] }>();
-const store = useDemoStore();
+import { useCommunication, resourceError } from "./communication";
+import { usePreferences, type TranslationKey } from "./preferences";
+const emit = defineEmits<{ open: [resourceId: string, kind: string] }>();
+const communication = useCommunication();
 const { t } = usePreferences();
 const open = ref(false);
 const root = ref<HTMLElement | null>(null);
-const trigger = ref<HTMLButtonElement | null>(null);
-const panel = ref<HTMLElement | null>(null);
-async function toggle(): Promise<void> {
+const button = ref<HTMLButtonElement | null>(null);
+const busy = ref(false);
+const error = ref<TranslationKey | null>(null);
+async function toggle() {
   open.value = !open.value;
   if (open.value) {
+    error.value = null;
     await nextTick();
-    panel.value?.focus();
+    root.value?.querySelector<HTMLElement>("[data-popover] button")?.focus();
   }
 }
-function close(): void {
+function close() {
   open.value = false;
-  trigger.value?.focus();
+  button.value?.focus();
 }
-function select(friendId: string): void {
-  store.markRead(friendId);
-  open.value = false;
-  emit("openDm", friendId);
-}
-function outside(event: PointerEvent): void {
+function outside(event: PointerEvent) {
   if (event.target instanceof Node && !root.value?.contains(event.target)) open.value = false;
+}
+async function read() {
+  busy.value = true;
+  error.value = null;
+  try {
+    await communication.readNotifications();
+  } catch (value) {
+    error.value = resourceError(value);
+  } finally {
+    busy.value = false;
+  }
+}
+async function more() {
+  busy.value = true;
+  error.value = null;
+  try {
+    await communication.moreNotifications();
+  } catch (value) {
+    error.value = resourceError(value);
+  } finally {
+    busy.value = false;
+  }
+}
+function select(id: string, kind: string) {
+  open.value = false;
+  emit("open", id, kind);
 }
 onMounted(() => document.addEventListener("pointerdown", outside));
 onBeforeUnmount(() => document.removeEventListener("pointerdown", outside));
@@ -35,209 +58,163 @@ onBeforeUnmount(() => document.removeEventListener("pointerdown", outside));
 <template>
   <div ref="root" class="notifications" @keydown.esc.stop="close">
     <button
-      ref="trigger"
-      class="bell-trigger"
+      ref="button"
+      class="bell"
       :aria-label="t('notifications')"
       :aria-expanded="open"
-      aria-haspopup="dialog"
-      aria-controls="notification-panel"
+      aria-controls="notification-popover"
       @click="toggle"
     >
-      <Icon name="bell" :size="19" /><span v-if="store.unreadCount" class="notice-count">{{
-        store.unreadCount
-      }}</span>
+      <Icon name="bell" :size="19" /><span
+        v-if="communication.unreadCount"
+        class="notification-count"
+        >{{ communication.unreadCount > 99 ? "99+" : communication.unreadCount }}</span
+      >
     </button>
     <section
       v-if="open"
-      id="notification-panel"
-      ref="panel"
-      class="notification-panel"
-      role="dialog"
-      :aria-label="t('notificationTitle')"
-      tabindex="-1"
+      id="notification-popover"
+      data-popover
+      class="notification-popover"
+      :aria-label="t('notificationHeading')"
     >
       <header>
-        <h2>{{ t("notificationTitle") }}</h2>
-        <button :aria-label="t('close')" @click="close"><Icon name="close" :size="17" /></button>
+        <strong>{{ t("notificationHeading") }}</strong
+        ><button :aria-label="t('close')" @click="close"><Icon name="close" :size="17" /></button>
       </header>
+      <button class="read-all" :disabled="busy || !communication.unreadCount" @click="read">
+        {{ t("notificationsRead") }}
+      </button>
       <div class="notice-list">
         <button
-          v-for="notice in store.notifications"
+          v-for="notice in communication.notifications"
           :key="notice.id"
           class="notice"
           :class="{ unread: !notice.read }"
-          @click="select(notice.friendId)"
+          :aria-label="t('notificationOpen')"
+          @click="select(notice.resourceId, notice.kind)"
         >
-          <span class="notice-avatar">{{ notice.friendId.slice(0, 1) }}</span
-          ><span
-            ><strong
-              >{{ notice.friendId }}<small v-if="!notice.read">{{ t("unread") }}</small></strong
-            ><span>{{ notice.textKey ? t(notice.textKey) : notice.text }}</span></span
-          ><Icon name="chevron" :size="15" />
+          <span>{{
+            t(
+              notice.kind === "friend_request"
+                ? "notificationFriendRequest"
+                : notice.kind === "friend_accepted"
+                  ? "notificationFriendAccepted"
+                  : "notificationMessage",
+              { name: notice.actorName },
+            )
+          }}</span
+          ><small v-if="!notice.read">{{ t("unread") }}</small>
         </button>
-        <p v-if="!store.notifications.length" class="notice-empty">{{ t("emptyNotifications") }}</p>
+        <p v-if="!communication.notifications.length">{{ t("noNotificationsReal") }}</p>
+        <button
+          v-if="communication.notificationCursor"
+          class="read-all"
+          :disabled="busy"
+          @click="more"
+        >
+          {{ t(busy ? "loading" : "more") }}
+        </button>
       </div>
-      <footer>
-        <button @click="store.notifications.forEach((notice) => (notice.read = true))">
-          {{ t("markAllRead") }}</button
-        ><button @click="store.simulateIncoming()">
-          <Icon name="plus" :size="14" />{{ t("simulateMessage") }}
-        </button>
-      </footer>
+      <p v-if="error" role="alert">{{ t(error) }}</p>
     </section>
   </div>
 </template>
 <style scoped>
 .notifications {
   position: relative;
-  flex-shrink: 0;
 }
-.bell-trigger {
+.bell {
   position: relative;
   display: grid;
   place-items: center;
-  width: 30px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   background: none;
   color: var(--muted);
 }
-.notice-count {
+.notification-count {
   position: absolute;
-  right: -5px;
-  top: -4px;
+  top: -8px;
+  right: -9px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 4px;
   display: grid;
   place-items: center;
-  font: 600 11px/1 var(--mono);
-  background: var(--green);
-  color: var(--on-accent);
+  border-radius: 10px;
   border: 2px solid var(--bg);
-  border-radius: 12px;
-  min-width: 20px;
-  min-height: 20px;
-  padding: 2px 4px;
+  background: var(--green);
+  color: var(--bg);
+  font: 600 11px var(--mono);
 }
-.notification-panel {
+.notification-popover {
   position: absolute;
-  right: 0;
-  top: calc(100% + 16px);
+  right: -8px;
+  top: 42px;
   z-index: 15;
-  width: min(360px, calc(100vw - 100px));
-  max-height: min(490px, calc(100dvh - 100px));
+  width: min(340px, calc(100vw - 85px));
+  max-height: min(450px, calc(100dvh - 110px));
+  min-height: 0;
   display: flex;
   flex-direction: column;
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 10px;
-  box-shadow: 0 18px 50px var(--shadow);
-  overflow: hidden;
+  border-radius: 9px;
+  box-shadow: 0 15px 40px var(--shadow);
+  padding: 14px;
 }
-.notification-panel header {
+header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding: 17px;
-  border-bottom: 1px solid var(--line);
-  flex-shrink: 0;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 10px;
+  font-size: 13px;
 }
-.notification-panel h2 {
-  font-size: 14px;
-  font-weight: 550;
-  margin: 0;
-}
-.notification-panel header button {
+header button {
   background: none;
   color: var(--muted);
-  padding: 3px;
-  display: grid;
-  place-items: center;
+}
+.read-all {
+  background: none;
+  color: var(--green);
+  font-size: 11px;
+  padding: 7px 0;
+  text-align: left;
 }
 .notice-list {
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 5px;
 }
 .notice {
-  display: flex;
   width: 100%;
-  align-items: center;
-  gap: 10px;
-  padding: 13px 9px;
-  background: none;
-  border-radius: 6px;
+  display: grid;
+  gap: 7px;
+  padding: 13px 10px;
+  margin: 5px 0;
+  border-radius: 5px;
   text-align: left;
-}
-.notice:hover {
-  background: var(--hover);
+  font-size: 12px;
+  line-height: 1.7;
+  background: var(--surface);
+  color: var(--text);
 }
 .notice.unread {
   background: var(--active);
   box-shadow: inset 3px 0 var(--green);
 }
-.notice.unread > span > span {
-  color: var(--text);
-}
-.notice + .notice {
-  margin-top: 4px;
-}
-.notice-avatar {
-  flex-shrink: 0;
-  width: 31px;
-  height: 31px;
-  display: grid;
-  place-items: center;
-  background: var(--sage-bg);
-  color: var(--sage-text);
-  border-radius: 10px;
-  font: 13px var(--mono);
-}
-.notice > span:nth-child(2) {
-  flex: 1;
-  min-width: 0;
-}
-.notice strong {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  font-weight: 550;
-}
 .notice small {
-  font: 7px var(--mono);
   color: var(--green);
+  font: 9px var(--mono);
 }
-.notice > span > span {
-  display: block;
-  margin-top: 5px;
-  font-size: 10px;
-  line-height: 1.7;
-  color: var(--muted);
-  overflow-wrap: anywhere;
-}
-.notice > svg {
-  flex-shrink: 0;
-  color: var(--muted);
-}
-.notice-empty {
+p {
   font-size: 12px;
-  padding: 20px;
   color: var(--muted);
+  line-height: 1.7;
 }
-.notification-panel footer {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  border-top: 1px solid var(--line);
-  padding: 12px 15px;
-  flex-shrink: 0;
-}
-.notification-panel footer button {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  background: none;
-  padding: 3px 0;
-  color: var(--green);
-  font-size: 9px;
+button:disabled {
+  opacity: 0.5;
 }
 </style>

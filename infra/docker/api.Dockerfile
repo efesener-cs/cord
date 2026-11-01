@@ -25,6 +25,8 @@ RUN pnpm install --prod --frozen-lockfile --filter @cord/api...
 COPY --from=build /app/apps/api/dist apps/api/dist
 COPY --from=build /app/packages/contracts/dist packages/contracts/dist
 COPY --from=build /app/packages/database/dist packages/database/dist
+RUN mkdir -p /app/data/uploads && chown -R node:node /app/data
+ENV UPLOAD_DIRECTORY=/app/data/uploads
 USER node
 EXPOSE 3000
 CMD ["node", "apps/api/dist/server.js"]

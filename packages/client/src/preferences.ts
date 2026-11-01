@@ -1,8 +1,10 @@
+import { resourceCopy } from "./resource-copy";
 import { defineStore } from "pinia";
 import { ref, watch } from "vue";
 
 const translations = {
   tr: {
+    ...resourceCopy.tr,
     usernameHint: "3–32 karakter: a–z, 0–9, _, . veya -. Harf ya da rakamla başla.",
     authValidation:
       "Kullanıcı adı 3–32 karakter (a-z, 0-9, _, ., -), e-posta geçerli, şifre 12–128 karakter olmalı.",
@@ -13,7 +15,7 @@ const translations = {
     authFailure: "İşlem tamamlanamadı. Biraz sonra tekrar dene.",
     authPending: "Bekle…",
     logoutFailed:
-      "Bu cihazdaki oturum kapatıldı ancak sunucuda iptal doğrulanamadı. Oturum en geç 24 saat içinde sona erer.",
+      "Çıkış sunucuda doğrulanamadı. Web oturumu yenilemede devam edebilir; bağlantını kontrol et. Oturum en geç 24 saat içinde sona erer.",
     forYou: "Senin için",
     recommendationIntro: "Bir topluluk keşfet ya da yarım kalan sohbetine dön.",
     discoverServer: "TOPLULUĞU KEŞFET",
@@ -115,7 +117,7 @@ const translations = {
     haveAccount: "Zaten bir hesabın var mı?",
     createAccount: "Hesap oluştur",
     registrationReceived: "Kayıt alındı. Giriş yapabilirsin.",
-    loginDemo: "Kayıtlı hesabınla giriş yap. Oturum bu uygulama penceresinde tutulur.",
+    loginDemo: "Kayıtlı hesabınla giriş yap. Kimliğin sunucuda doğrulanır.",
     registerDemo:
       "Hesabın sunucuda oluşturulur. Şifren en az 12 karakter olmalı; e-posta doğrulaması henüz yok.",
     signOut: "Çıkış yap",
@@ -230,6 +232,7 @@ const translations = {
     local: "YEREL",
   },
   en: {
+    ...resourceCopy.en,
     usernameHint: "3–32 characters: a–z, 0–9, _, . or -. Start with a letter or digit.",
     authValidation:
       "Use a 3–32 character username (a-z, 0-9, _, ., -), a valid email, and a 12–128 character password.",
@@ -240,7 +243,7 @@ const translations = {
     authFailure: "Could not complete the request. Please try again shortly.",
     authPending: "Please wait…",
     logoutFailed:
-      "Signed out on this device, but server revocation could not be confirmed. The session expires within 24 hours.",
+      "Server logout could not be confirmed. A web session may return after refresh; check your connection. The session expires within 24 hours.",
     forYou: "For you",
     recommendationIntro: "Discover a community or pick up a conversation.",
     discoverServer: "DISCOVER A COMMUNITY",
@@ -342,7 +345,7 @@ const translations = {
     haveAccount: "Already have an account?",
     createAccount: "Create an account",
     registrationReceived: "Registration received. You can now log in.",
-    loginDemo: "Sign in with your registered account. Your session stays in this app window.",
+    loginDemo: "Sign in with your registered account. Your credentials are verified by the server.",
     registerDemo:
       "Your account is created on the server. Use at least 12 password characters; email verification is not available yet.",
     signOut: "Log out",

@@ -1,130 +1,109 @@
-# Account API
+# HTTP and realtime API
 
-The backend is an Express 5/TypeScript modular monolith with PostgreSQL and Prisma 7.10.1. It implements account registration, login, logout, and current-user lookup. Messages, servers/channels, uploads, and Socket.IO remain local previews or future features.
+The Express modular monolith uses PostgreSQL/Prisma 7.10.1. The shared SDK validates public responses with Zod. The dashboard uses persistent servers, memberships, channels, friends, conversations, messages, notifications, and account preferences. Implementation in this slice has not been compiled or runtime-tested; verification is assigned to the user in [verification.md](verification.md).
 
-## URLs and ports
+## Addresses and startup
 
-| Service | Host address | Compose-network address |
+Local Compose exposes Caddy at `http://localhost:8081`, API at `http://127.0.0.1:3001`, PostgreSQL at `127.0.0.1:5433`, and media signaling at `ws://localhost:7880`. Inside Compose, use `api:3000`, `postgres:5432`, and `media:7880`. Caddy and Vite proxy `/api` including Socket.IO. Resource paths below are prefixed by `/api/v1`.
+
+```sh
+docker compose --env-file .env.example up -d --build --wait web api media
+```
+
+For host development, create a root `.env` from `.env.example` only if one does not already exist. Start PostgreSQL, run `pnpm db:migrate`, then `pnpm api:dev`. Prisma migrations are additive; never reset a valuable database. The new communication migration must be applied before the updated API starts. The Compose migration dependency handles this when images are rebuilt.
+
+## Authentication
+
+| Method | Path | Response |
 | --- | --- | --- |
-| Bundled frontend/Caddy | `http://localhost:8081` | `web:80` |
-| Vite frontend | `http://localhost:5173` | `web-dev:5173` |
-| API | `http://127.0.0.1:3001` | `api:3000` |
-| PostgreSQL | `127.0.0.1:5433` | `postgres:5432` |
+| GET | `/health` | Process liveness |
+| POST | `/auth/register` | 201 `{ user }` |
+| POST | `/auth/login` | `{ user, expiresAt }`; native response also contains `token` |
+| POST | `/auth/logout` | 204; idempotent session revocation |
+| GET | `/users/me` | `{ user: { id, username } }` |
+| GET / PUT | `/users/me/preferences` | `{ preferences: { locale, theme } }` |
 
-Caddy and Vite forward `/api` without removing its prefix. Web requests use the current origin. Frontend pages such as `/dashboard` remain separate from `/api/v1/...`; unknown API paths always return JSON errors, never SPA HTML.
+Registration uses `{ username, email, password }`. Usernames normalize to lowercase and contain 3–32 ASCII letters/digits/underscores/dots/hyphens, starting with a letter or digit. Passwords contain 12–128 characters; email verification/password reset are not implemented. Login uses `{ username, password }`. Unknown fields are rejected.
 
-## Implemented endpoints
+All account/resource calls declare `X-Cord-Client: web` or `native`. Web uses a host-only HttpOnly SameSite=Lax cookie with a fixed 24-hour expiry. Production defaults to `COOKIE_SECURE=true`, `__Host-cord_session`, Path=/; the loopback HTTP preview explicitly uses `cord_session`, Path=/api/v1. Web SDK requests use same-origin credentials and never receive a token in JSON. Cookie writes reject cross-site requests and origins outside `API_WEB_ORIGINS`. Native requests omit cookies and use `Authorization: Bearer <token>`. Transport fallback is forbidden. `API_ALLOWED_ORIGINS` controls exact native CORS origins; it is not authentication.
 
-All paths below start with `/api/v1`. Request and response validation schemas live in `packages/contracts`.
+Passwords use bounded-concurrency asynchronous scrypt. Sessions are random opaque 32-byte tokens; only SHA-256 digests are stored. Sessions expire after 24 hours. Registration/login share a per-IP limit of 30 per 15 minutes. Resource routers additionally limit authenticated users to 300 requests per minute per router instance. Limits are process-local; this deployment is a single API instance. Forwarded IP headers are not trusted.
 
-| Method | Path | Successful response | Authentication |
-| --- | --- | --- | --- |
-| GET | `/health` | 200 `{ status, service, apiVersion, uptimeSeconds }` | None |
-| POST | `/auth/register` | 201 `{ user: { id, username } }` | None |
-| POST | `/auth/login` | 200 `{ user: { id, username }, token, expiresAt }` | None |
-| POST | `/auth/logout` | 204, empty body | Bearer token syntax required; revocation is idempotent |
-| GET | `/users/me` | 200 `{ user: { id, username } }` | Valid, unexpired Bearer session |
+## Servers, membership, channels
 
-Registration body:
-
-```json
-{
-  "username": "deniz",
-  "email": "deniz@example.test",
-  "password": "a-long-example-password"
-}
-```
-
-Login accepts `username` and `password`. Usernames are trimmed, lowercased, and restricted to 3–32 ASCII letters/digits/underscores/dots/hyphens, beginning with a letter or digit. Email is validated and lowercased, with a maximum of 254 characters. Passwords are not trimmed and must contain 12–128 characters at registration. Login accepts 1–128 password characters. Unknown body fields are rejected. Registration does not automatically log in; the UI shows success on the login page. Email verification and password reset are not implemented.
-
-Send `Authorization: Bearer <token>` on protected requests. Public user responses intentionally omit email and password hashes.
-
-## Sessions and request protections
-
-- Passwords use asynchronous Node `scrypt` with a random 16-byte salt, `N=131072`, `r=8`, `p=1`, and timing-safe hash comparison. Unknown usernames perform the same expensive hash operation. At most two hash operations run concurrently; excess requests return 503 instead of building an unbounded queue.
-- Login issues a cryptographically random 32-byte opaque token. Only its SHA-256 digest is stored in PostgreSQL, together with its user and 24-hour expiry. Logout deletes the corresponding session; expired sessions cannot authenticate. Login removes expired sessions for that user. Global expiry cleanup and session management UI remain future work.
-- The shared SDK attaches the token explicitly and uses `credentials: 'omit'`; no auth cookies are created. The Pinia store holds the token only in memory, never localStorage/sessionStorage. Reloading or restarting requires login again; any unreachable server session expires within 24 hours.
-- Dashboard navigation calls `/users/me`; unauthenticated/invalid sessions go to login. This frontend check is not server authorization: `/users/me` independently validates the token. Local demo messages remain separate from real accounts.
-- Both account-creation and login requests share a per-IP, in-memory limit of 30 requests per 15 minutes. It resets on API restart and is not a distributed protection. Proxy headers are not trusted: through Caddy the limit is conservatively shared by clients at that proxy address. A reviewed trusted-proxy policy is needed before public deployment.
-- `API_ALLOWED_ORIGINS` is an explicit comma-separated CORS allowlist; no wildcard or credentialed CORS is enabled. Local Compose defaults to `null` solely for Electron's `file://` preview. This permits the origin class, not a particular file, and is not authentication. For same-origin public web hosting set it to an empty value; configure exact HTTPS native origins as needed.
-- Use HTTPS outside the loopback development environment. Bearer tokens must not appear in URLs or logs. Persistent native credential storage is not implemented.
-
-Responses include a fresh `X-Request-Id` and `Cache-Control: no-store`. JSON bodies are limited to 16 KiB. Helmet adds baseline headers. Request logging includes ID, method, status, and elapsed time; it omits request bodies, credentials, tokens, cookies, and query strings.
-
-Errors use `{ "error": { "code", "message", "requestId" } }`:
-
-| Status | Code | Meaning |
+| Method | Path | Permission / payload |
 | --- | --- | --- |
-| 400 | `VALIDATION_ERROR` / `INVALID_JSON` | Invalid fields / malformed JSON |
-| 401 | `INVALID_CREDENTIALS` / `UNAUTHORIZED` | Incorrect login / missing, invalid, or expired session |
-| 404 | `NOT_FOUND` | Unknown endpoint |
-| 409 | `ACCOUNT_EXISTS` | Duplicate username or email |
-| 413 | `PAYLOAD_TOO_LARGE` | Body exceeds 16 KiB |
-| 429 | `RATE_LIMITED` | Account attempt limit reached |
-| 503 | `SERVICE_BUSY` | Password-hashing concurrency limit reached |
-| 500 | `INTERNAL_ERROR` | Redacted unexpected failure |
+| GET / POST | `/servers` | List joined servers / create `{ name }` |
+| GET / POST | `/servers/:serverId/channels` | Member reads / owner creates `{ name }` |
+| GET | `/servers/:serverId/members` | Member-only paginated member list |
+| POST | `/servers/:serverId/invites` | Owner creates a seven-day invitation; returns `{ code, expiresAt, serverId }` |
+| DELETE | `/servers/:serverId/invites` | Owner revokes all invitation codes |
+| POST | `/servers/join` | Join with `{ code }`; repeated joins are idempotent |
+| POST | `/servers/:serverId/leave` | Member leaves; owner must delete instead |
+| DELETE | `/servers/:serverId/members/:userId` | Owner removes another member |
+| DELETE | `/servers/:serverId` | Owner deletes server and cascading channels/messages |
 
-`GET /health` is process liveness, not an ongoing database readiness check. Startup connects to PostgreSQL first; Caddy's `/healthz` independently checks static web serving.
+Server names are trimmed Unicode text, 1–80 characters without control/format characters. Creating a server atomically creates its owner membership and the initial `genel` channel. Channel names normalize to lowercase and contain 1–64 ASCII letters, digits, or hyphens, starting with a letter/digit. Names are unique within a server. Only token digests of invitation codes are stored.
 
-## Database and migrations
+Public server fields are `id`, `name`, `ownerId`, `createdAt`; channel fields are `id`, `name`, `serverId`, `createdAt`. Member responses include public user, join date, and `owner`. Nonmembers and absent servers both return 404. Members without ownership receive 403 on owner actions. Current roles are owner/member; configurable roles and ownership transfer are not implemented.
 
-`packages/database` owns the Prisma schema, generated client boundary, and migrations. Only server code imports it. `User` has unique normalized username/email and a password hash; `Session` has a unique token digest, user foreign key, creation/expiry times, and lookup/expiry indexes. Deleting a user cascades sessions. The generated client and build outputs are ignored; commit schema and migration files.
+Server/channel/member/conversation/notification lists use `limit` (1–100, default 50) and UUID `cursor`, returning `nextCursor` or null. Member cursors are user IDs; other cursors are resource IDs. Unknown query fields are rejected. Server/channel lists sort by creation time then ID ascending; conversations/notifications sort descending.
 
-Prisma 7.10.1 is pinned consistently for CLI/client/adapter, avoiding the registry's Prisma 8 release candidate. Configuration is in `packages/database/prisma7.config.ts`; Prisma commands explicitly select it. Its URL is taken from the process environment or root `.env`, with the documented local `cord` fallback. The API requires `DATABASE_URL`; host-run commands load root `.env` without overriding explicit environment values.
+## Friends, conversations, notifications
 
-```sh
-cp .env.example .env # only if no real .env exists
-pnpm install --frozen-lockfile
-pnpm db:generate
-pnpm db:migrate
-pnpm api:dev
-```
-
-The database must be running before the last two commands. Root `.env` uses host URL `postgresql://cord:cord@127.0.0.1:5433/cord`; Compose constructs its internal URL from `POSTGRES_*` values and `postgres:5432`. URL-encode special characters in credentials used inside connection URLs. Production secret delivery remains deployment work.
-
-`pnpm db:migrate` applies committed migrations with `prisma migrate deploy`; it never resets the database. For a new schema change use `pnpm db:migrate:dev --name <description>` against an appropriate development database. Do not accept a reset against valuable data. Existing volumes are preserved.
-
-## Containers
-
-```sh
-docker compose --env-file .env.example up -d --build --wait api web
-```
-
-Compose starts healthy PostgreSQL, runs the one-shot `migrate` service, then starts the API and Caddy. The migration image includes Prisma CLI tooling; the API runtime contains production dependencies and compiled API/contracts/database code and runs as non-root `node`. Existing database credentials must match the persistent volume; changing initialization variables does not change an existing user's password.
-
-For watched API sources and Vite:
-
-```sh
-docker compose --env-file .env.example -f compose.yaml -f compose.dev.yaml up -d --build api web-dev
-```
-
-The override mounts API/contracts/database sources, starts Node watch mode, and keeps API port 3001 distinct from Vite 5173. Rebuild after dependency or migration changes; restart the API after data-access package changes because its compiled dependency is built at startup. Return to compiled runtime with the base Compose command.
-
-Electron's local renderer defaults to `http://127.0.0.1:3001`; `VITE_API_URL` at desktop build time selects an HTTP(S) origin and updates its CSP allowlist. The mobile browser preview uses its Vite `/api` proxy on port 5175. Native Capacitor builds require a reachable `VITE_API_URL`, appropriate server CORS, and platform networking/TLS configuration; native auth runtime has not been validated. Never set a frontend variable to a database URL.
-
-## Tests
-
-`apps/api/test/auth.integration.test.ts` contains eight PostgreSQL-backed HTTP tests: validation, normalized/hashed registration, uniqueness, invalid credentials, current-user lookup and token storage, revocation, expiry, rate limiting, and CORS. Supply a dedicated migrated test database; the tests remove only their randomly named test user and cascade its sessions. Do not point them at production. Without `TEST_DATABASE_URL` the integration suite is explicitly skipped, not evidence of a passing database run.
-
-```sh
-DATABASE_URL=postgresql://cord:cord@127.0.0.1:5433/cord_test pnpm db:migrate
-TEST_DATABASE_URL=postgresql://cord:cord@127.0.0.1:5433/cord_test pnpm api:test
-```
-
-Create that dedicated database first. `pnpm api:test` builds database/contracts before running Vitest through Vite+. Additional foundation/security coverage remains open, including proxy policies and real native/browser verification.
-
-## Deferred endpoint slices
-
-These routes are proposed, not implemented:
-
-| Methods | Path after `/api/v1` | Intended behavior |
+| Method | Path | Payload / behavior |
 | --- | --- | --- |
-| GET / POST | `/servers` | List joined servers / create a server |
-| GET / POST | `/servers/:serverId/channels` | List visible channels / create a permitted channel |
-| GET / POST | `/channels/:channelId/messages` | Read paginated history / persist a message |
-| GET / POST | `/conversations` | List DMs / find or create a permitted conversation |
-| GET / POST | `/conversations/:conversationId/messages` | Read DM history / persist a DM |
+| GET / POST | `/friends` | List all friend relationships / request `{ username }` |
+| POST | `/friends/:id/accept` | Only the request recipient can accept |
+| DELETE | `/friends/:id` | Decline, cancel, or remove the caller's relationship |
+| GET / POST | `/conversations` | List caller's DMs / create or find `{ userId }` |
+| GET | `/notifications` | Paginated notifications and total `unreadCount` |
+| POST | `/notifications/read` | `{ resourceId? }`; omit to mark all read |
 
-Membership authorization, persistence, pagination, and contracts precede Socket.IO delivery. Uploads, invitations, friends, and notification synchronization follow their feature slices. HTTP and event handlers share business services; media transport remains separate.
+A canonical unique user pair prevents duplicate/mutual friend requests and duplicate conversations. Creating a new DM requires an accepted friendship. Existing conversations remain accessible to their two participants after friendship removal. No arbitrary user can read or send to another DM. Notifications are persisted for friend requests, acceptance, and received DMs. `resourceId` identifies a relationship or conversation, depending on kind. System notifications are opt-in; native local notifications require a running application to receive events. Optional FCM delivery can notify closed Android apps when operator configuration is supplied; local notifications alone do not provide closed-app delivery.
 
-References: [Prisma 7 PostgreSQL setup](https://www.prisma.io/docs/v7/prisma-orm/quickstart/postgresql), [OWASP password storage](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html).
+## Messages and files
+
+| Method | Path | Behavior |
+| --- | --- | --- |
+| GET / POST | `/channels/:id/messages` | Member-only history / send |
+| GET / POST | `/conversations/:id/messages` | Participant-only history / send |
+| POST | `/uploads?name=...&mediaType=...` | Upload binary `application/octet-stream`, up to 10 MiB |
+| GET | `/uploads/:id` | Authenticated attachment download |
+| DELETE | `/uploads/:id` | Delete caller-owned unattached upload |
+
+Send `{ clientId: UUID, content: string, attachmentIds?: UUID[] }`. Content is trimmed, at most 4000 characters. At least content or one attachment is required; at most four attachments are allowed. Attachments must be owned, unattached uploads; claiming them and writing the message/DM notification is transactional. `(authorId, clientId)` provides retry idempotency. Reusing an ID in a different destination is rejected. Database checks require exactly one message target.
+
+History is fetched newest page first, returned in chronological order within each page. `nextCursor` points to the oldest message in that page to fetch earlier messages. The client merges by message ID and fills missed pages after reconnect. A message contains public author, content, ISO date, destination IDs, client ID, and attachment metadata.
+
+Files are stored by random UUID under server-only `UPLOAD_DIRECTORY`. Downloads verify current target access and force attachment disposition with nosniff/sandbox headers; no HTML/SVG inline rendering. Before message attachment, only the uploader can read the file. A staged-upload limit and hourly cleanup remove uploads older than one day and old orphaned files. Attached files remain until their database resource is removed; orphan disk reclamation follows on cleanup. Uploaded content is not malware-scanned. Backups must include both PostgreSQL and the uploads volume.
+
+## Socket.IO
+
+The Socket.IO path is `/api/socket.io`, not the HTTP v1 prefix. Browser handshake auth is `{ client: 'web' }` with its cookie and an exact allowed web Origin. Native handshake auth is `{ client: 'native', token }`; tokens never enter query strings. Connection origins must be in the configured web/native allowlists. Clients receive only events for current members/participants; the server resolves membership again on message/typing broadcasts rather than trusting stale channel rooms.
+
+- `message:created`: validated public message.
+- `resources:changed`: refresh authoritative HTTP lists/notifications.
+- `presence:changed`: friend-only user ID and online state.
+- `presence:list`: acknowledgement containing currently online accepted friend IDs.
+- `typing`: client `{ target: { kind: 'channel'|'conversation', id }, active }`; server adds public user after authorization.
+
+Typing is throttled. Session expiry disconnects the socket; API logout immediately disconnects all sockets with that token. Administrative database revocation is detected by periodic session checks. Presence is in memory; process restarts/reconnects rebuild it. Messages are committed over HTTP; Socket.IO accelerates delivery and HTTP history recovers gaps. No Redis or multi-instance adapter is configured.
+
+## Media
+
+`POST /media/token` accepts `{ kind: 'channel'|'conversation', id }`, verifies current access, and returns a short-lived LiveKit room grant `{ url, token, room }`. Server-only `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET` never enter client environment variables. `LIVEKIT_URL` must be reachable from the actual client. The media plane is separate from HTTP/Socket.IO. Microphone/camera publishing and desktop/browser screen capture use LiveKit. Android uses a custom Capacitor MediaProjection adapter with the native LiveKit SDK to publish a screen-only participant. `POST /media/screen-token` issues its separately scoped identity; it cannot subscribe to room audio/video. iOS screen broadcasting still requires a ReplayKit extension.
+
+Room grants bind participant identity to the user's session digest and expire after sixty seconds for joining. The API also reconciles active LiveKit rooms against current sessions and destination access every ten seconds, and requests reconciliation on logout/membership changes. Invalid participants are removed through the media administration API. Configure server-only `LIVEKIT_INTERNAL_URL` to the media HTTP address (`http://media:7880` inside Compose). Enforcement is bounded by reconciliation and media availability, not an assertion that JWT expiration itself disconnects an existing call. See [self-hosting.md](self-hosting.md) for signaling, ICE, and TURN configuration.
+
+## Errors and verification
+
+Errors use `{ error: { code, message, requestId } }`. Statuses include 400 validation/JSON, 401 unauthenticated, 403 CSRF/permission, 404 absent/private resource, 409 duplicate/conflict, 413 payload limit, 429 rate limit, and 503 busy/unconfigured media. Unexpected errors are redacted. Responses use request IDs and no-store headers; request logging excludes credentials, cookies, token headers, query strings, and bodies.
+
+Existing `pnpm api:test` suites cover account/session, server/channel foundations, and deployment cookie policy. Database tests require a dedicated migrated `TEST_DATABASE_URL` and are skipped without it. New communication/realtime/upload/media behavior still needs the checks in [verification.md](verification.md); no passing result is claimed for this slice.
+
+## Optional Android background push
+
+`POST /devices/register` accepts a native authenticated `{ token }`. The FCM registration token is stored against the current session; logout cascades its device registration and expired sessions are excluded from delivery. No device/session tokens are logged or returned. Delivery is off by default. `PUSH_ENABLED=true` requires a server-only `GOOGLE_APPLICATION_CREDENTIALS` JSON file. The optional `compose.push.yaml` mounts the operator file specified by `PUSH_CREDENTIALS_FILE`.
+
+Unread recent notifications with eligible devices are sent through Firebase Admin on resource changes and periodic retries. Invalid provider tokens are removed; notification delivery is marked after provider acceptance. Provider acceptance is not proof of device display. This integration, token refresh, opt-in, and killed-app receipt still require user verification and external provider setup. iOS APNs registration/delivery is not configured by the Android-first adapter.

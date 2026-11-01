@@ -33,7 +33,13 @@
     "client:deps": "pnpm -r --filter @cord/sdk... build",
     "db:generate": "pnpm --filter @cord/database generate",
     "db:migrate": "pnpm --filter @cord/database migrate:deploy",
-    "db:migrate:dev": "pnpm --filter @cord/database migrate:dev"
+    "db:migrate:dev": "pnpm --filter @cord/database migrate:dev",
+    "desktop:test": "pnpm --filter @cord/desktop test",
+    "client:test": "pnpm client:deps && pnpm --filter @cord/client test",
+    "desktop:package": "pnpm client:deps && pnpm --filter @cord/desktop package",
+    "mobile:apk": "pnpm client:deps && pnpm --filter @cord/mobile apk",
+    "backup": "bash scripts/backup.sh",
+    "restore": "bash scripts/restore.sh"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",

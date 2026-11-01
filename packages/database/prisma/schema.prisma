@@ -1,9 +1,9 @@
 generator client {
-  provider = "prisma-client"
-  output = "../src/generated/prisma"
-  moduleFormat = "esm"
+  provider               = "prisma-client"
+  output                 = "../src/generated/prisma"
+  moduleFormat           = "esm"
   generatedFileExtension = "ts"
-  importFileExtension = "ts"
+  importFileExtension    = "ts"
 }
 
 datasource db {
@@ -11,22 +11,164 @@ datasource db {
 }
 
 model User {
-  id           String    @id @default(uuid()) @db.Uuid
-  username     String    @unique @db.VarChar(32)
-  email        String    @unique @db.VarChar(254)
-  passwordHash String    @db.Text
-  createdAt    DateTime  @default(now()) @db.Timestamptz(3)
-  sessions     Session[]
+  id             String         @id @default(uuid()) @db.Uuid
+  username       String         @unique @db.VarChar(32)
+  email          String         @unique @db.VarChar(254)
+  passwordHash   String         @db.Text
+  createdAt      DateTime       @default(now()) @db.Timestamptz(3)
+  sessions       Session[]
+  ownedServers   Server[]       @relation("ServerOwner")
+  memberships    ServerMember[]
+  locale         String         @default("tr") @db.VarChar(2)
+  theme          String         @default("dark") @db.VarChar(5)
+  friendsA       Friendship[]   @relation("FriendA")
+  friendsB       Friendship[]   @relation("FriendB")
+  conversationsA Conversation[] @relation("ConversationA")
+  conversationsB Conversation[] @relation("ConversationB")
+  messages       Message[]
+  attachments    Attachment[]
+  notifications  Notification[]
 }
 
 model Session {
-  id        String   @id @default(uuid()) @db.Uuid
-  tokenHash String   @unique @db.Char(64)
-  userId    String   @db.Uuid
-  createdAt DateTime @default(now()) @db.Timestamptz(3)
-  expiresAt DateTime @db.Timestamptz(3)
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id        String       @id @default(uuid()) @db.Uuid
+  tokenHash String       @unique @db.Char(64)
+  userId    String       @db.Uuid
+  createdAt DateTime     @default(now()) @db.Timestamptz(3)
+  expiresAt DateTime     @db.Timestamptz(3)
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  devices   PushDevice[]
 
   @@index([userId])
   @@index([expiresAt])
+}
+
+model Server {
+  id        String         @id @default(uuid()) @db.Uuid
+  name      String         @db.VarChar(80)
+  ownerId   String         @db.Uuid
+  createdAt DateTime       @default(now()) @db.Timestamptz(3)
+  owner     User           @relation("ServerOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members   ServerMember[]
+  channels  Channel[]
+  invites   ServerInvite[]
+
+  @@index([ownerId])
+}
+
+model ServerMember {
+  serverId String   @db.Uuid
+  userId   String   @db.Uuid
+  joinedAt DateTime @default(now()) @db.Timestamptz(3)
+  server   Server   @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([serverId, userId])
+  @@index([userId, serverId])
+}
+
+model Channel {
+  id        String    @id @default(uuid()) @db.Uuid
+  serverId  String    @db.Uuid
+  name      String    @db.VarChar(64)
+  createdAt DateTime  @default(now()) @db.Timestamptz(3)
+  server    Server    @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  messages  Message[]
+
+  @@unique([serverId, name])
+  @@index([serverId, createdAt, id])
+}
+
+model ServerInvite {
+  id        String   @id @default(uuid()) @db.Uuid
+  tokenHash String   @unique @db.Char(64)
+  serverId  String   @db.Uuid
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  expiresAt DateTime @db.Timestamptz(3)
+  server    Server   @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@index([serverId])
+}
+
+model Friendship {
+  id          String   @id @default(uuid()) @db.Uuid
+  userAId     String   @db.Uuid
+  userBId     String   @db.Uuid
+  requestedBy String   @db.Uuid
+  accepted    Boolean  @default(false)
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  userA       User     @relation("FriendA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB       User     @relation("FriendB", fields: [userBId], references: [id], onDelete: Cascade)
+
+  @@unique([userAId, userBId])
+  @@index([userBId])
+}
+
+model Conversation {
+  id        String    @id @default(uuid()) @db.Uuid
+  userAId   String    @db.Uuid
+  userBId   String    @db.Uuid
+  createdAt DateTime  @default(now()) @db.Timestamptz(3)
+  userA     User      @relation("ConversationA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB     User      @relation("ConversationB", fields: [userBId], references: [id], onDelete: Cascade)
+  messages  Message[]
+
+  @@unique([userAId, userBId])
+  @@index([userBId])
+}
+
+model Message {
+  id             String        @id @default(uuid()) @db.Uuid
+  clientId       String        @db.Uuid
+  authorId       String        @db.Uuid
+  channelId      String?       @db.Uuid
+  conversationId String?       @db.Uuid
+  content        String        @db.VarChar(4000)
+  createdAt      DateTime      @default(now()) @db.Timestamptz(3)
+  author         User          @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  channel        Channel?      @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  attachments    Attachment[]
+
+  @@unique([authorId, clientId])
+  @@index([channelId, createdAt, id])
+  @@index([conversationId, createdAt, id])
+}
+
+model Attachment {
+  id        String   @id @default(uuid()) @db.Uuid
+  ownerId   String   @db.Uuid
+  messageId String?  @db.Uuid
+  name      String   @db.VarChar(255)
+  mediaType String   @db.VarChar(127)
+  size      Int
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  owner     User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  message   Message? @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId, createdAt])
+}
+
+model Notification {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @db.Uuid
+  pushedAt   DateTime? @db.Timestamptz(3)
+  actorName  String    @db.VarChar(32)
+  kind       String    @db.VarChar(32)
+  resourceId String    @db.Uuid
+  read       Boolean   @default(false)
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt, id])
+}
+
+model PushDevice {
+  id        String   @id @default(uuid()) @db.Uuid
+  sessionId String   @db.Uuid
+  token     String   @unique @db.VarChar(2048)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
 }

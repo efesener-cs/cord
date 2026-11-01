@@ -31,3 +31,11 @@ apps/mobile/ios/**/xcuserdata/
 
 # Prisma client is generated from the committed schema.
 packages/database/src/generated/
+
+# Runtime uploads and operator backups.
+.data/
+backups/
+# Optional push provider configuration is operator-owned.
+google-services.json
+GoogleService-Info.plist
+*.p8

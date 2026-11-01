@@ -121,16 +121,39 @@ try {
       ].join(delimiter),
     };
     await run([fileURLToPath(import.meta.resolve("vite-plus/bin")), "build"], environment);
-    // cap run already synchronizes the native project; do not copy assets twice.
-    await run(
-      [
-        join(dirname(require.resolve("@capacitor/cli/package.json")), "bin/capacitor"),
-        "run",
-        "android",
-        ...process.argv.slice(2),
-      ],
-      environment,
-    );
+    if (process.argv.includes("--apk")) {
+      await run(
+        [
+          join(dirname(require.resolve("@capacitor/cli/package.json")), "bin/capacitor"),
+          "sync",
+          "android",
+        ],
+        environment,
+      );
+      await new Promise<void>((resolveBuild, reject) => {
+        const task = process.argv.includes("--release") ? "assembleRelease" : "assembleDebug";
+        const child = spawn(process.platform === "win32" ? "gradlew.bat" : "./gradlew", [task], {
+          cwd: join(appRoot, "android"),
+          env: environment,
+          stdio: "inherit",
+        });
+        child.on("error", reject);
+        child.on("exit", (code) =>
+          code === 0 ? resolveBuild() : reject(new Error("APK build failed.")),
+        );
+      });
+    } else {
+      // cap run synchronizes native assets before launching the explicitly selected target.
+      await run(
+        [
+          join(dirname(require.resolve("@capacitor/cli/package.json")), "bin/capacitor"),
+          "run",
+          "android",
+          ...process.argv.slice(2),
+        ],
+        environment,
+      );
+    }
   }
 } catch (error: unknown) {
   console.error(error instanceof Error ? error.message : "Unable to prepare Android.");

@@ -1,0 +1,8 @@
+# Optional Android FCM delivery. Merge with the chosen base/self-hosting Compose file.
+services:
+  api:
+    environment:
+      PUSH_ENABLED: "true"
+      GOOGLE_APPLICATION_CREDENTIALS: /run/cord-push.json
+    volumes:
+      - ${PUSH_CREDENTIALS_FILE:?Set the external Firebase service-account JSON path}:/run/cord-push.json:ro

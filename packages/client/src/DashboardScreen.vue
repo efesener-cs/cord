@@ -1,282 +1,571 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import { requestNotifications, consumeNotificationIntent } from "./notifications";
+import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from "vue";
+import { useRouter } from "vue-router";
+import type { PublicServer, PublicConversation, PublicUser, MessageTarget } from "@cord/contracts";
 import Icon from "@cord/ui/CordIcon.vue";
 import CordLogo from "@cord/ui/CordLogo.vue";
 import { ApiError } from "@cord/sdk";
-import { friends, servers, type Friend } from "./demo";
-import { useDemoStore } from "./store";
 import { useSessionStore } from "./session";
-import { useRouter } from "vue-router";
+import { useCommunication, targetKey, resourceError } from "./communication";
+import { usePreferences, type TranslationKey } from "./preferences";
 import AppearanceControls from "./AppearanceControls.vue";
-import ChatPanel from "./ChatPanel.vue";
 import AuthTerminal from "./AuthTerminal.vue";
 import NotificationsPopover from "./NotificationsPopover.vue";
-import { usePreferences } from "./preferences";
-
+import RealChat from "./RealChat.vue";
+import CallPanel from "./CallPanel.vue";
 const preferences = usePreferences();
 const { t } = preferences;
-
-const store = useDemoStore();
 const session = useSessionStore();
+const communication = useCommunication();
 const router = useRouter();
 const displayName = computed(() => session.username || t("user"));
 const avatarInitial = computed(() =>
   displayName.value.slice(0, 1).toLocaleUpperCase(preferences.locale),
 );
-const signOutPending = ref(false);
-const signOutError = ref(false);
-async function signOut() {
-  if (signOutPending.value) return;
-  signOutPending.value = true;
-  signOutError.value = false;
-  try {
-    await session.logout();
-  } catch (error) {
-    signOutError.value = !(error instanceof ApiError && error.status === 401);
-  } finally {
-    signOutPending.value = false;
-  }
-  store.reset();
-  void router.push({ path: "/login", query: signOutError.value ? { logoutFailed: "1" } : {} });
-}
-const section = ref("home");
-const filter = ref("online");
-const hasUnread = (id: string): boolean =>
-  store.notifications.some((notice) => notice.friendId === id && !notice.read);
-const query = ref("");
-const selectedFriend = ref<Friend | null>(null);
-const dialog = ref<"friend" | "server" | "settings" | null>(null);
-const friendHandle = ref("");
-const feedback = ref("");
-const activeServer = ref(servers[0]!);
-const selectedRoomId = ref<string | null>(null);
-const activeRoom = computed(() =>
-  activeServer.value.rooms.find((room) => room.id === selectedRoomId.value),
+const section = ref<"home" | "friends" | "messages" | "server">("home");
+const activeServerId = ref<string | null>(null);
+const activeServer = computed(() =>
+  communication.servers.find((server) => server.id === activeServerId.value),
 );
-const activeThread = computed(() =>
-  selectedFriend.value
-    ? `dm:${selectedFriend.value.id}`
-    : activeRoom.value
-      ? `server:${activeServer.value.id}:${activeRoom.value.id}`
+const selectedChannelId = ref<string | null>(null);
+const selectedConversation = ref<PublicConversation | null>(null);
+const activeRoom = computed(() =>
+  (communication.channels[activeServerId.value ?? ""] ?? []).find(
+    (channel) => channel.id === selectedChannelId.value,
+  ),
+);
+const isOwner = computed(() => activeServer.value?.ownerId === session.user?.id);
+const activeTarget = computed<MessageTarget | null>(() =>
+  selectedConversation.value
+    ? { kind: "conversation", id: selectedConversation.value.id }
+    : section.value === "server" && activeRoom.value
+      ? { kind: "channel", id: activeRoom.value.id }
       : null,
 );
 const activeTitle = computed(
-  () => selectedFriend.value?.name ?? t(activeRoom.value?.label ?? "generalChannel"),
+  () =>
+    selectedConversation.value?.user.username ??
+    activeRoom.value?.name ??
+    activeServer.value?.name ??
+    t("home"),
 );
 const activeSubtitle = computed(() =>
-  selectedFriend.value
-    ? t(selectedFriend.value.activity)
-    : `${t(activeServer.value.label)} / ${t("room")}`,
+  selectedConversation.value ? t("directMessages") : (activeServer.value?.name ?? ""),
 );
 const mobileNav = ref(false);
-const modalElement = ref<HTMLElement | null>(null);
-let previousFocus: HTMLElement | null = null;
-watch(dialog, async (value) => {
-  if (value) {
-    previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    await nextTick();
-    modalElement.value?.querySelector<HTMLButtonElement>("button")?.focus();
-  } else {
-    previousFocus?.focus();
-  }
-});
-function trapFocus(event: KeyboardEvent) {
-  if (event.key !== "Tab") return;
-  const elements = modalElement.value?.querySelectorAll<HTMLElement>(
-    'button, input, [tabindex="0"]',
-  );
-  const first = elements?.[0];
-  const last = elements?.[elements.length - 1];
-  if (event.shiftKey && document.activeElement === first) {
-    event.preventDefault();
-    last?.focus();
-  } else if (!event.shiftKey && document.activeElement === last) {
-    event.preventDefault();
-    first?.focus();
-  }
-}
-async function focusSearch() {
-  navigate("friends");
-  await nextTick();
-  document.getElementById("friend-search")?.focus();
-}
-const onlineCount = friends.filter((friend) => friend.presence !== "offline").length;
+const channelLoading = ref(false);
+const channelError = ref<TranslationKey | null>(null);
+const pageError = ref<TranslationKey | null>(null);
+const working = ref(false);
+const query = ref("");
+const filter = ref<"online" | "all">("all");
 const visibleFriends = computed(() =>
-  friends.filter(
+  communication.acceptedFriends.filter(
     (friend) =>
-      (filter.value === "all" || friend.presence !== "offline") &&
-      `${friend.name} ${friend.handle}`
+      (filter.value === "all" || communication.onlineIds.includes(friend.user.id)) &&
+      friend.user.username
         .toLocaleLowerCase(preferences.locale)
         .includes(query.value.toLocaleLowerCase(preferences.locale)),
   ),
 );
-function navigate(value: string) {
-  const server = servers.find((item) => item.id === value);
-  selectedFriend.value = null;
-  if (server) {
-    activeServer.value = server;
-    selectedRoomId.value = server.rooms[0]!.id;
-    section.value = "server";
-    mobileNav.value = true;
+const onlineCount = computed(() => communication.onlineCount);
+const dialog = ref<
+  "friend" | "server" | "channel" | "join" | "invite" | "members" | "settings" | "confirm" | null
+>(null);
+const modalElement = ref<HTMLElement | null>(null);
+const formName = ref("");
+const formError = ref<TranslationKey | null>(null);
+const formSuccess = ref<TranslationKey | null>(null);
+const pending = ref(false);
+const invite = ref("");
+const copied = ref(false);
+const members = ref<{ user: PublicUser; joinedAt: string; owner: boolean }[]>([]);
+const memberCursor = ref<string | null>(null);
+const call = ref<{ target: MessageTarget; title: string } | null>(null);
+let previousFocus: HTMLElement | null = null;
+let dialogServerId: string | null = null;
+let confirmation: (() => Promise<void>) | undefined;
+let selectionVersion = 0;
+let disposed = false;
+const modalTitle = computed<TranslationKey>(
+  () =>
+    (
+      {
+        friend: "addFriend",
+        server: "createServer",
+        channel: "createChannel",
+        join: "joinServer",
+        invite: "invitePeople",
+        members: "serverMembers",
+        settings: "settings",
+        confirm: "confirmAction",
+      } as const
+    )[dialog.value ?? "settings"],
+);
+watch(dialog, async (value) => {
+  if (value) {
+    previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    await nextTick();
+    (
+      modalElement.value?.querySelector<HTMLElement>("input, button") ?? modalElement.value
+    )?.focus();
   } else {
-    selectedRoomId.value = null;
-    section.value = value;
-    mobileNav.value = false;
+    await nextTick();
+    previousFocus?.focus();
+  }
+});
+function closeDialog() {
+  if (!pending.value) dialog.value = null;
+}
+function trapFocus(event: KeyboardEvent) {
+  if (event.key !== "Tab") return;
+  const elements = modalElement.value?.querySelectorAll<HTMLElement>(
+    'button:not(:disabled), input:not(:disabled), [tabindex="0"]',
+  );
+  const first = elements?.[0];
+  const last = elements?.[elements.length - 1];
+  if (!first) {
+    event.preventDefault();
+    modalElement.value?.focus();
+  } else if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last?.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
   }
 }
-function openRoom(id: string): void {
-  selectedFriend.value = null;
-  selectedRoomId.value = id;
+function openDialog(value: NonNullable<typeof dialog.value>) {
+  if (pending.value) return;
+  formName.value = "";
+  formError.value = null;
+  formSuccess.value = null;
+  invite.value = "";
+  copied.value = false;
+  dialogServerId = activeServerId.value;
+  dialog.value = value;
+  if (value === "members") {
+    members.value = [];
+    memberCursor.value = null;
+    void loadMembers();
+  }
+}
+async function loadMembers(append = false) {
+  if (!dialogServerId || pending.value) return;
+  pending.value = true;
+  formError.value = null;
+  try {
+    const page = await session.api.listMembers(dialogServerId, {
+      limit: 50,
+      ...(append && memberCursor.value ? { cursor: memberCursor.value } : {}),
+    });
+    members.value = append ? [...members.value, ...page.members] : page.members;
+    memberCursor.value = page.nextCursor;
+  } catch (value) {
+    formError.value = resourceError(value);
+  } finally {
+    pending.value = false;
+  }
+}
+function navigate(value: "home" | "friends" | "messages") {
+  selectionVersion++;
+  section.value = value;
+  selectedChannelId.value = null;
+  selectedConversation.value = null;
+  mobileNav.value = false;
+}
+async function openServer(server: PublicServer) {
+  const version = ++selectionVersion;
+  activeServerId.value = server.id;
+  section.value = "server";
+  selectedConversation.value = null;
+  selectedChannelId.value = null;
+  channelLoading.value = true;
+  channelError.value = null;
+  mobileNav.value = true;
+  try {
+    const rows = await communication.loadChannels(server.id);
+    if (version === selectionVersion) selectedChannelId.value = rows[0]?.id ?? null;
+  } catch (value) {
+    if (version === selectionVersion) channelError.value = resourceError(value);
+  } finally {
+    if (version === selectionVersion) channelLoading.value = false;
+  }
+}
+function openRoom(id: string) {
+  selectedConversation.value = null;
+  selectedChannelId.value = id;
   section.value = "server";
   mobileNav.value = false;
 }
-function openChat(friend: Friend) {
-  selectedFriend.value = friend;
-  selectedRoomId.value = null;
+function openConversation(conversation: PublicConversation) {
+  if (disposed) return;
+  selectionVersion++;
+  selectedConversation.value = conversation;
+  selectedChannelId.value = null;
   section.value = "messages";
-  store.markRead(friend.id);
   mobileNav.value = false;
+  void communication.readNotifications(conversation.id).catch(() => {});
 }
-function openChatById(id: string): void {
-  const friend = friends.find((item) => item.id === id);
-  if (friend) openChat(friend);
-}
-function previewFor(id: string): string {
-  const latest = store.messages[`dm:${id}`]?.at(-1);
-  if (!latest) {
-    const notice = store.notifications.find((item) => item.friendId === id);
-    return notice ? (notice.textKey ? t(notice.textKey) : notice.text) : t("noMessageYet");
+async function perform(work: () => Promise<void>) {
+  if (working.value) return;
+  working.value = true;
+  pageError.value = null;
+  try {
+    await work();
+  } catch (value) {
+    pageError.value = resourceError(value);
+  } finally {
+    working.value = false;
   }
-  return latest.textKey
-    ? t(latest.textKey)
-    : latest.text || latest.attachments.map((file) => file.name).join(", ");
 }
-function openDialog(value: "friend" | "server" | "settings") {
-  feedback.value = "";
-  friendHandle.value = "";
-  dialog.value = value;
+function startChat(userId: string) {
+  void perform(async () => {
+    const result = await session.api.createConversation(userId);
+    openConversation(result.conversation);
+    await communication.refresh();
+  });
 }
-function submitFriend() {
-  if (friendHandle.value.trim()) feedback.value = "friend";
+async function openNotification(resourceId: string, kind: string) {
+  if (kind !== "direct_message") {
+    await communication.readNotifications(resourceId).catch(() => {});
+    navigate("friends");
+    return;
+  }
+  await communication.refresh();
+  if (communication.loading)
+    await new Promise<void>((resolve) => {
+      const stop = watch(
+        () => communication.loading,
+        (loading) => {
+          if (!loading) {
+            stop();
+            resolve();
+          }
+        },
+      );
+    });
+  if (disposed) return;
+  const conversation = communication.conversations.find((row) => row.id === resourceId);
+  if (conversation) openConversation(conversation);
 }
+function confirm(work: () => Promise<void>) {
+  confirmation = work;
+  openDialog("confirm");
+}
+async function submit() {
+  if (pending.value) return;
+  const identity = session.user?.id;
+  const mode = dialog.value;
+  const serverId = dialogServerId;
+  pending.value = true;
+  formError.value = null;
+  formSuccess.value = null;
+  try {
+    if (mode === "server") {
+      const result = await session.api.createServer({ name: formName.value });
+      if (disposed || session.user?.id !== identity) return;
+      if (!communication.servers.some((server) => server.id === result.server.id))
+        communication.servers.push(result.server);
+      await openServer(result.server);
+      dialog.value = null;
+    } else if (mode === "join") {
+      const result = await session.api.joinServer(formName.value.trim());
+      if (disposed || session.user?.id !== identity) return;
+      if (!communication.servers.some((server) => server.id === result.server.id))
+        communication.servers.push(result.server);
+      await openServer(result.server);
+      dialog.value = null;
+    } else if (mode === "channel" && serverId) {
+      const result = await session.api.createChannel(serverId, { name: formName.value });
+      await communication.loadChannels(serverId);
+      openRoom(result.channel.id);
+      dialog.value = null;
+    } else if (mode === "friend") {
+      await session.api.requestFriend(formName.value);
+      formSuccess.value = "requestSent";
+      formName.value = "";
+      await communication.refresh();
+    } else if (mode === "invite" && serverId) {
+      const result = await session.api.createInvite(serverId);
+      invite.value = result.code;
+    } else if (mode === "confirm" && confirmation) {
+      await confirmation();
+      dialog.value = null;
+      await communication.refresh();
+    }
+  } catch (value) {
+    formError.value = resourceError(value);
+  } finally {
+    pending.value = false;
+  }
+}
+async function revokeInvites() {
+  if (!dialogServerId || pending.value) return;
+  pending.value = true;
+  try {
+    await session.api.revokeInvites(dialogServerId);
+    invite.value = "";
+    formSuccess.value = "invitesRevoked";
+  } catch (value) {
+    formError.value = resourceError(value);
+  } finally {
+    pending.value = false;
+  }
+}
+async function copyInvite() {
+  try {
+    await navigator.clipboard.writeText(invite.value);
+    copied.value = true;
+  } catch {
+    copied.value = false;
+  }
+}
+function leaveServer() {
+  const server = activeServer.value;
+  if (!server) return;
+  confirm(async () => {
+    if (server.ownerId === session.user?.id) await session.api.deleteServer(server.id);
+    else await session.api.leaveServer(server.id);
+    navigate("home");
+    activeServerId.value = null;
+  });
+}
+async function signOut() {
+  if (working.value || pending.value) return;
+  working.value = true;
+  call.value = null;
+  let failed = false;
+  try {
+    await session.logout();
+  } catch (value) {
+    failed = !(value instanceof ApiError && value.status === 401);
+  } finally {
+    communication.reset();
+    working.value = false;
+  }
+  await router.push({ path: "/login", query: failed ? { logoutFailed: "1" } : {} });
+}
+watch(
+  () => session.user,
+  (user) => {
+    if (!user && !disposed) {
+      call.value = null;
+      void router.replace("/login");
+    }
+  },
+);
+watch(
+  () => (activeTarget.value ? targetKey(activeTarget.value) : null),
+  () => {
+    communication.activeTarget = activeTarget.value;
+    if (activeTarget.value) void communication.loadHistory(activeTarget.value);
+  },
+);
+watch(
+  () => communication.servers,
+  (rows) => {
+    if (
+      section.value === "server" &&
+      activeServerId.value &&
+      !rows.some((server) => server.id === activeServerId.value)
+    ) {
+      navigate("home");
+      activeServerId.value = null;
+      call.value = null;
+    }
+  },
+);
+watch(
+  () => communication.loading,
+  (loading) => {
+    if (!loading && activeServer.value && section.value === "server") {
+      const serverId = activeServer.value.id;
+      void communication.loadChannels(serverId).catch((value) => {
+        channelError.value = resourceError(value);
+      });
+    }
+  },
+);
+async function enableNotifications() {
+  try {
+    formSuccess.value = (await requestNotifications())
+      ? "notificationsEnabled"
+      : "notificationsDenied";
+  } catch {
+    formError.value = "notificationsDenied";
+  }
+}
+function notificationIntent() {
+  const value = consumeNotificationIntent();
+  if (value) void openNotification(value.resourceId, value.kind);
+}
+function pushDevice() {
+  void communication.registerPushDevice();
+}
+function notificationOpen(event: Event) {
+  const detail = (event as CustomEvent<{ resourceId?: unknown; kind?: unknown }>).detail;
+  if (typeof detail?.resourceId === "string")
+    void openNotification(
+      detail.resourceId,
+      typeof detail.kind === "string" ? detail.kind : "direct_message",
+    );
+}
+function resume() {
+  void communication.refresh();
+}
+onMounted(() => {
+  void communication.start();
+  window.addEventListener("cord:notification-intent", notificationIntent);
+  notificationIntent();
+  window.addEventListener("cord:push-device", pushDevice);
+  window.addEventListener("cord:notification-open", notificationOpen);
+  window.addEventListener("cord:resume", resume);
+  window.addEventListener("online", resume);
+});
+onBeforeUnmount(() => {
+  selectionVersion++;
+  disposed = true;
+  window.removeEventListener("cord:notification-intent", notificationIntent);
+  window.removeEventListener("cord:push-device", pushDevice);
+  window.removeEventListener("cord:notification-open", notificationOpen);
+  window.removeEventListener("cord:resume", resume);
+  window.removeEventListener("online", resume);
+  communication.reset();
+});
 </script>
-
 <template>
   <div class="app-shell">
     <aside class="server-rail" :aria-label="t('servers')">
-      <button class="brand-mark selected" :aria-label="t('homeLabel')" @click="navigate('home')">
+      <button class="brand-mark" :aria-label="t('homeLabel')" @click="navigate('home')">
         <CordLogo class="brand-logo" />
       </button>
       <div class="rail-rule"></div>
       <button
-        class="server-icon forest"
-        :class="{ 'server-selected': activeServer.id === 'forest' && !!activeRoom }"
-        :aria-label="t('forestPreview')"
-        @click="navigate('forest')"
+        v-for="server in communication.servers"
+        :key="server.id"
+        class="server-icon forest real-server"
+        :class="{ 'server-selected': section === 'server' && activeServerId === server.id }"
+        :title="server.name"
+        :aria-label="server.name"
+        :aria-pressed="section === 'server' && activeServerId === server.id"
+        @click="openServer(server)"
       >
-        <Icon name="leaf" :size="25" />
-      </button>
-      <button
-        class="server-icon terminal"
-        :class="{ 'server-selected': activeServer.id === 'terminal' && !!activeRoom }"
-        :aria-label="t('terminalPreview')"
-        @click="navigate('terminal')"
-      >
-        &gt;_
-      </button>
-      <button
-        class="server-icon sunset"
-        :class="{ 'server-selected': activeServer.id === 'night' && !!activeRoom }"
-        :aria-label="t('nightPreview')"
-        @click="navigate('night')"
-      >
-        月
+        {{ server.name.slice(0, 2).toLocaleUpperCase(preferences.locale) }}
       </button>
       <button
         class="server-icon add-server"
-        :aria-label="t('addServer')"
+        :aria-label="t('createServer')"
+        :title="t('createServer')"
         @click="openDialog('server')"
       >
         <Icon name="plus" :size="23" />
       </button>
+      <button
+        class="server-icon add-server"
+        :aria-label="t('joinServer')"
+        :title="t('joinServer')"
+        @click="openDialog('join')"
+      >
+        <Icon name="arrow" :size="21" />
+      </button>
       <div class="rail-bottom">
-        <span class="connection-dot"></span><span>{{ t("local") }}</span>
+        <span
+          class="connection-dot"
+          :class="{ 'is-offline': communication.status !== 'connected' }"
+        ></span
+        ><span>cord</span>
       </div>
     </aside>
-
     <aside class="sidebar" :class="{ 'mobile-open': mobileNav }" :aria-label="t('navigation')">
       <div class="workspace-brand">
         <span>cord<span class="accent">_</span></span
-        ><span class="version">preview / 01</span>
+        ><span class="version">preview</span>
       </div>
       <div class="sidebar-content">
-        <button class="quick-search" @click="focusSearch">
-          <Icon name="search" :size="16" /><span>{{ t("findSomeone") }}</span
-          ><span class="keycap">⌕</span>
+        <button
+          class="quick-search"
+          :disabled="communication.loading"
+          @click="communication.refresh()"
+        >
+          <Icon name="down" :size="16" /><span>{{
+            t(communication.loading ? "loading" : "refreshResources")
+          }}</span>
         </button>
         <nav class="primary-nav">
-          <button
-            :class="{ active: section === 'home' && !selectedFriend }"
-            @click="navigate('home')"
-          >
-            <Icon name="home" /><span>{{ t("home") }}</span
-            ><span class="nav-tail">⌁</span>
+          <button :class="{ active: section === 'home' }" @click="navigate('home')">
+            <Icon name="home" /><span>{{ t("home") }}</span>
           </button>
-          <button
-            :class="{ active: section === 'friends' && !selectedFriend }"
-            @click="navigate('friends')"
-          >
+          <button :class="{ active: section === 'friends' }" @click="navigate('friends')">
             <Icon name="people" /><span>{{ t("friends") }}</span
-            ><span class="count">{{ onlineCount }}</span>
+            ><span class="count">{{ communication.incomingFriends.length || onlineCount }}</span>
           </button>
           <button :class="{ active: section === 'messages' }" @click="navigate('messages')">
             <Icon name="chat" /><span>{{ t("messages") }}</span
-            ><span v-if="store.unreadCount" class="count">{{ store.unreadCount }}</span>
+            ><span v-if="communication.unreadCount" class="count">{{
+              communication.unreadCount
+            }}</span>
           </button>
         </nav>
-        <template v-if="section === 'server'">
+        <template v-if="section === 'server' && activeServer">
           <div class="section-label">
-            <span>{{ t("serverRooms") }}</span
-            ><Icon name="hash" :size="14" />
+            <span>{{ t("textChannels") }}</span
+            ><button v-if="isOwner" :aria-label="t('createChannel')" @click="openDialog('channel')">
+              <Icon name="plus" :size="16" />
+            </button>
           </div>
           <div class="server-room-heading">
-            <Icon :name="activeServer.icon" :size="17" /><strong>{{ t(activeServer.label) }}</strong
-            ><span class="version">LOCAL</span>
+            <Icon name="hash" :size="17" /><strong>{{ activeServer.name }}</strong>
+          </div>
+          <p v-if="channelLoading" class="resource-note" role="status">{{ t("loading") }}</p>
+          <div v-if="channelError" class="resource-note" role="alert">
+            {{ t(channelError)
+            }}<button class="text-button" @click="openServer(activeServer)">
+              {{ t("retry") }}
+            </button>
           </div>
           <div class="room-list">
             <button
-              v-for="room in activeServer.rooms"
+              v-for="room in communication.channels[activeServer.id] ?? []"
               :key="room.id"
               :class="{ 'room-active': activeRoom?.id === room.id }"
+              :aria-pressed="activeRoom?.id === room.id"
               @click="openRoom(room.id)"
             >
-              <Icon name="hash" :size="17" /><span>{{ t(room.label) }}</span
-              ><Icon v-if="activeRoom?.id === room.id" name="chevron" :size="13" />
+              <Icon name="hash" :size="17" /><span>{{ room.name }}</span>
+            </button>
+          </div>
+          <p
+            v-if="
+              !channelLoading && !channelError && !communication.channels[activeServer.id]?.length
+            "
+            class="resource-note"
+          >
+            {{ t("noChannels") }}
+          </p>
+          <div class="server-actions">
+            <button class="text-button" @click="openDialog('members')">
+              <Icon name="people" :size="16" />{{ t("serverMembers") }}</button
+            ><button v-if="isOwner" class="text-button" @click="openDialog('invite')">
+              <Icon name="plus" :size="16" />{{ t("invitePeople") }}</button
+            ><button class="text-button" @click="leaveServer">
+              {{ t(isOwner ? "deleteServer" : "leaveServer") }}
             </button>
           </div>
         </template>
       </div>
       <div class="profile">
-        <span class="avatar small self"
-          >{{ avatarInitial }}<span class="accent">.</span><i class="online"></i
-        ></span>
+        <span class="avatar small self">{{ avatarInitial }}<span class="accent">.</span></span>
         <div>
           <strong>{{ displayName }}</strong
-          ><span>{{ t("online") }}</span>
+          ><span>{{ t(communication.status === "connected" ? "online" : "offline") }}</span>
         </div>
-        <button
-          :class="{ toggled: store.muted }"
-          :aria-pressed="store.muted"
-          :aria-label="store.muted ? t('unmute') : t('mute')"
-          @click="store.muted = !store.muted"
-        >
-          <Icon name="mic" :size="17" /></button
-        ><button :aria-label="t('settings')" @click="openDialog('settings')">
+        <button :aria-label="t('settings')" @click="openDialog('settings')">
           <Icon name="settings" :size="18" />
         </button>
       </div>
     </aside>
-
     <div class="main-shell">
       <header class="topbar">
         <div class="breadcrumb">
@@ -288,344 +577,479 @@ function submitFriend() {
           >
             <Icon name="home" /></button
           ><Icon name="home" :size="18" /><span>{{
-            selectedFriend
-              ? t("dmBreadcrumb")
-              : activeRoom
-                ? t(activeServer.label)
-                : t("personalSpace")
+            section === "server" ? activeServer?.name : t("personalSpace")
           }}</span
           ><span class="slash">/</span
           ><strong>{{
-            (activeThread ? activeTitle : null) ??
-            (section === "home"
-              ? t("home")
-              : section === "friends"
-                ? t("friends")
-                : section === "messages"
-                  ? t("messages")
-                  : t("serverPreview"))
+            activeTarget
+              ? activeTitle
+              : t(
+                  section === "home"
+                    ? "home"
+                    : section === "friends"
+                      ? "friends"
+                      : section === "messages"
+                        ? "messages"
+                        : "serverScope",
+                )
           }}</strong>
         </div>
         <div class="topbar-right">
           <button
             :aria-label="t('signOut')"
             :title="t('signOut')"
-            :disabled="signOutPending"
+            :disabled="working || pending"
             @click="signOut"
           >
-            <Icon name="exit" :size="18" />
-          </button>
-          <AppearanceControls />
-          <span class="preview-badge">{{ t("localPreview") }}</span
-          ><span class="topbar-divider"></span><NotificationsPopover @open-dm="openChatById" />
+            <Icon name="exit" :size="18" /></button
+          ><AppearanceControls /><NotificationsPopover @open="openNotification" />
         </div>
       </header>
-
-      <main v-if="!activeThread" class="dashboard">
+      <div v-if="communication.error || pageError" class="resource-banner" role="alert">
+        {{ t(pageError ?? communication.error!)
+        }}<button
+          class="text-button"
+          :disabled="communication.loading"
+          @click="
+            pageError = null;
+            communication.refresh();
+          "
+        >
+          {{ t("retry") }}
+        </button>
+      </div>
+      <CallPanel
+        v-if="call"
+        :key="targetKey(call.target)"
+        :target="call.target"
+        :title="call.title"
+        @close="call = null"
+      />
+      <RealChat
+        v-if="activeTarget"
+        :key="targetKey(activeTarget)"
+        :target="activeTarget"
+        :title="activeTitle"
+        :subtitle="activeSubtitle"
+        @back="navigate(selectedConversation ? 'messages' : 'home')"
+        @call="call = { target: activeTarget!, title: activeTitle }"
+      />
+      <main v-else class="dashboard">
         <div class="main-column">
-          <template v-if="section === 'home' || section === 'friends'">
-            <section v-if="section === 'home'" class="welcome">
+          <template v-if="section === 'home'">
+            <section class="welcome">
               <div class="welcome-content">
-                <div class="eyebrow"><span></span> {{ t("connected") }}</div>
+                <div class="eyebrow"><span></span>{{ t("realWorkspace") }}</div>
                 <h1>{{ t("welcome", { name: displayName }) }}<span>_</span></h1>
-                <p>{{ t("startConversation") }}<br />{{ t("internetCorner") }}</p>
-                <button class="welcome-action" @click="openDialog('friend')">
-                  {{ t("bringFriend") }} <Icon name="arrow" :size="16" />
+                <p>{{ t("internetCorner") }}</p>
+                <button class="welcome-action" @click="openDialog('server')">
+                  {{ t("createServer") }}<Icon name="arrow" :size="16" />
                 </button>
               </div>
               <AuthTerminal class="welcome-terminal" />
               <div class="welcome-footer">
                 <span
-                  ><span class="connection-dot"></span> {{ onlineCount }}
+                  ><span class="connection-dot"></span>{{ onlineCount }}
                   {{ t("friendsHere") }}</span
                 ><span>{{ t("makeAtHome") }}</span>
               </div>
             </section>
-            <section v-if="section === 'home'" class="recommendations">
+            <section class="recommendations">
               <div class="section-heading">
                 <div>
                   <Icon name="leaf" :size="21" />
-                  <h2>{{ t("forYou") }}</h2>
+                  <h2>{{ t("yourServers") }}</h2>
                 </div>
-                <span class="recommendation-label">{{ t("localPreview") }}</span>
+                <button class="text-button" @click="openDialog('join')">
+                  {{ t("joinServer") }}
+                </button>
               </div>
-              <p class="recommendation-intro">{{ t("recommendationIntro") }}</p>
+              <p
+                v-if="communication.loading && !communication.servers.length"
+                class="resource-note"
+                role="status"
+              >
+                {{ t("loading") }}
+              </p>
+              <p
+                v-else-if="!communication.servers.length && !communication.error"
+                class="recommendation-intro"
+              >
+                {{ t("noServers") }}
+              </p>
               <div class="recommendation-grid">
                 <button
-                  v-for="server in servers"
+                  v-for="server in communication.servers"
                   :key="server.id"
                   class="recommendation-card"
-                  @click="navigate(server.id)"
+                  @click="openServer(server)"
                 >
-                  <span class="recommendation-icon"><Icon :name="server.icon" :size="23" /></span>
-                  <span class="recommendation-copy"
-                    ><small>{{ t("discoverServer") }}</small
-                    ><strong>{{ t(server.label) }}</strong
-                    ><span>{{ t("serverSuggestion") }}</span></span
-                  >
-                  <Icon name="arrow" :size="17" />
+                  <span class="recommendation-icon">{{
+                    server.name.slice(0, 2).toLocaleUpperCase(preferences.locale)
+                  }}</span
+                  ><span class="recommendation-copy"
+                    ><strong>{{ server.name }}</strong
+                    ><small>{{
+                      t(server.ownerId === session.user?.id ? "owner" : "member")
+                    }}</small></span
+                  ><Icon name="arrow" :size="17" />
                 </button>
-              </div>
-              <h3 class="resume-heading">{{ t("continueConversation") }}</h3>
-              <button
-                v-for="friend in friends.slice(0, 2)"
-                :key="friend.id"
-                class="friend-row"
-                :class="{ 'conversation-unread': hasUnread(friend.id) }"
-                @click="openChat(friend)"
-              >
-                <span class="avatar" :class="friend.color"
-                  >{{ friend.initials }}<i :class="friend.presence"></i
-                ></span>
-                <span class="friend-info"
-                  ><strong
-                    >{{ friend.name
-                    }}<small v-if="hasUnread(friend.id)" class="unread-label">{{
-                      t("unread")
-                    }}</small></strong
-                  ><span>{{ previewFor(friend.id) }}</span></span
-                >
-                <Icon name="arrow" :size="17" />
-              </button>
-            </section>
-            <section v-if="section === 'friends'" class="friends-section">
-              <div class="section-heading">
-                <div>
-                  <Icon name="people" :size="21" />
-                  <h2>{{ t("yourFriends") }}</h2>
-                  <span class="total-count">{{ friends.length }}</span>
-                </div>
-                <button class="text-button" @click="openDialog('friend')">
-                  <Icon name="plus" :size="16" /> {{ t("addFriend") }}
-                </button>
-              </div>
-              <div class="friend-toolbar">
-                <div class="tabs" :aria-label="t('friendFilter')">
-                  <button
-                    :class="{ active: filter === 'online' }"
-                    :aria-pressed="filter === 'online'"
-                    @click="filter = 'online'"
-                  >
-                    {{ t("online") }} <span>{{ onlineCount }}</span></button
-                  ><button
-                    :class="{ active: filter === 'all' }"
-                    :aria-pressed="filter === 'all'"
-                    @click="filter = 'all'"
-                  >
-                    {{ t("all") }}
-                  </button>
-                </div>
-                <label class="friend-search"
-                  ><Icon name="search" :size="16" /><input
-                    id="friend-search"
-                    v-model="query"
-                    :placeholder="t('searchFriends')"
-                    :aria-label="t('searchFriends')"
-                /></label>
-              </div>
-              <div class="list-label">
-                {{ filter === "all" ? t("allFriends") : t("aroundNow") }} —
-                {{ visibleFriends.length }}
-              </div>
-              <div class="friend-list">
-                <button
-                  v-for="friend in visibleFriends"
-                  :key="friend.id"
-                  class="friend-row"
-                  @click="openChat(friend)"
-                >
-                  <span class="avatar" :class="friend.color"
-                    >{{ friend.initials }}<i :class="friend.presence"></i></span
-                  ><span class="friend-info"
-                    ><strong
-                      >{{ friend.name }}<small>{{ friend.handle }}</small></strong
-                    ><span
-                      ><span v-if="friend.id === 'nova'" class="music-note">♫ </span
-                      >{{ t(friend.activity) }}</span
-                    ></span
-                  ><span class="friend-chat"><Icon name="chat" :size="19" /></span>
-                </button>
-                <div v-if="!visibleFriends.length" class="empty-state">
-                  {{ t("noFriends") }}
-                </div>
               </div>
             </section>
-            <div class="bottom-note">
-              <Icon name="leaf" :size="15" /><span>{{ t("lessNoise") }}</span
-              ><span class="bottom-line"></span><span class="mono">est. 2026</span>
-            </div>
           </template>
-          <section v-else class="simple-page">
-            <span class="eyebrow">{{ t("dmBreadcrumb") }}</span>
-            <h1>{{ t("openMessages") }}<span>_</span></h1>
-            <button
-              v-for="friend in friends"
+          <template v-else-if="section === 'friends'">
+            <div class="section-heading">
+              <div>
+                <Icon name="people" :size="21" />
+                <h2>{{ t("yourFriends") }}</h2>
+                <span class="total-count">{{ communication.acceptedFriends.length }}</span>
+              </div>
+              <button class="text-button" @click="openDialog('friend')">
+                <Icon name="plus" :size="16" />{{ t("addFriend") }}
+              </button>
+            </div>
+            <h3 v-if="communication.incomingFriends.length" class="resume-heading">
+              {{ t("incomingRequests") }}
+            </h3>
+            <article
+              v-for="friend in communication.incomingFriends"
               :key="friend.id"
               class="friend-row"
-              :class="{ 'conversation-unread': hasUnread(friend.id) }"
-              @click="openChat(friend)"
             >
-              <span class="avatar" :class="friend.color"
-                >{{ friend.initials }}<i :class="friend.presence"></i></span
+              <span class="friend-info"
+                ><strong>{{ friend.user.username }}</strong
+                ><small>{{ t("pendingRequest") }}</small></span
+              ><button
+                class="text-button"
+                :disabled="working"
+                @click="
+                  perform(async () => {
+                    await session.api.acceptFriend(friend.id);
+                    await communication.refresh();
+                  })
+                "
+              >
+                {{ t("accept") }}</button
+              ><button
+                class="text-button"
+                :disabled="working"
+                @click="
+                  perform(async () => {
+                    await session.api.removeFriend(friend.id);
+                    await communication.refresh();
+                  })
+                "
+              >
+                {{ t("decline") }}
+              </button>
+            </article>
+            <div class="friend-toolbar">
+              <div class="tabs">
+                <button
+                  :class="{ active: filter === 'all' }"
+                  :aria-pressed="filter === 'all'"
+                  @click="filter = 'all'"
+                >
+                  {{ t("all") }}</button
+                ><button
+                  :class="{ active: filter === 'online' }"
+                  :aria-pressed="filter === 'online'"
+                  @click="filter = 'online'"
+                >
+                  {{ t("online") }}<span>{{ onlineCount }}</span>
+                </button>
+              </div>
+              <label class="friend-search"
+                ><Icon name="search" :size="16" /><input
+                  v-model="query"
+                  :placeholder="t('searchFriends')"
+                  :aria-label="t('searchFriends')"
+              /></label>
+            </div>
+            <article v-for="friend in visibleFriends" :key="friend.id" class="friend-row">
+              <span class="avatar sage"
+                >{{ friend.user.username.slice(0, 1)
+                }}<i
+                  :class="communication.onlineIds.includes(friend.user.id) ? 'online' : 'offline'"
+                ></i></span
               ><span class="friend-info"
-                ><strong
-                  >{{ friend.name }}<small>{{ friend.handle }}</small
-                  ><small v-if="hasUnread(friend.id)" class="unread-label">{{
-                    t("unread")
-                  }}</small></strong
-                ><span>{{ previewFor(friend.id) }}</span></span
-              ><Icon name="chat" :size="19" />
+                ><strong>{{ friend.user.username }}</strong
+                ><span>{{
+                  t(communication.onlineIds.includes(friend.user.id) ? "online" : "offline")
+                }}</span></span
+              ><button
+                class="text-button"
+                :disabled="working"
+                :aria-label="t('startChat')"
+                @click="startChat(friend.user.id)"
+              >
+                <Icon name="chat" /></button
+              ><button
+                class="text-button"
+                :aria-label="t('removeFriend')"
+                @click="
+                  confirm(async () => {
+                    await session.api.removeFriend(friend.id);
+                  })
+                "
+              >
+                <Icon name="close" :size="17" />
+              </button>
+            </article>
+            <p v-if="!visibleFriends.length && !communication.loading" class="resource-note">
+              {{ t(communication.acceptedFriends.length ? "noFriends" : "noRealFriends") }}
+            </p>
+            <h3
+              v-if="communication.friends.some((friend) => !friend.accepted && !friend.incoming)"
+              class="resume-heading"
+            >
+              {{ t("outgoingRequests") }}
+            </h3>
+            <article
+              v-for="friend in communication.friends.filter(
+                (friend) => !friend.accepted && !friend.incoming,
+              )"
+              :key="friend.id"
+              class="friend-row"
+            >
+              <span class="friend-info"
+                ><strong>{{ friend.user.username }}</strong
+                ><span>{{ t("pendingRequest") }}</span></span
+              ><button
+                class="text-button"
+                :disabled="working"
+                @click="
+                  perform(async () => {
+                    await session.api.removeFriend(friend.id);
+                    await communication.refresh();
+                  })
+                "
+              >
+                {{ t("cancel") }}
+              </button>
+            </article>
+          </template>
+          <template v-else-if="section === 'messages'"
+            ><div class="section-heading">
+              <h2>{{ t("messages") }}</h2>
+              <button class="text-button" @click="navigate('friends')">
+                {{ t("browseFriends") }}
+              </button>
+            </div>
+            <button
+              v-for="conversation in communication.conversations"
+              :key="conversation.id"
+              class="friend-row"
+              :class="{
+                'conversation-unread': communication.notifications.some(
+                  (notice) => notice.resourceId === conversation.id && !notice.read,
+                ),
+              }"
+              @click="openConversation(conversation)"
+            >
+              <span class="avatar sage">{{ conversation.user.username.slice(0, 1) }}</span
+              ><span class="friend-info"
+                ><strong>{{ conversation.user.username }}</strong
+                ><span>{{
+                  communication.messages[
+                    targetKey({ kind: "conversation", id: conversation.id })
+                  ]?.at(-1)?.content || t("noMessageYet")
+                }}</span></span
+              ><Icon name="chat" />
+            </button>
+            <p
+              v-if="!communication.conversations.length && !communication.loading"
+              class="resource-note"
+            >
+              {{ t("noConversations") }}
+            </p></template
+          >
+          <section v-else class="simple-page">
+            <h1>{{ activeServer?.name }}</h1>
+            <p>{{ t(channelLoading ? "loading" : "chooseChannel") }}</p>
+            <button v-if="activeServer" class="primary-button" @click="mobileNav = true">
+              {{ t("textChannels") }}
             </button>
           </section>
         </div>
-
-        <aside v-if="section === 'home'" class="activity-column" :aria-label="t('activities')">
-          <div class="activity-title">
-            <h2>{{ t("happening") }}</h2>
-            <span class="live-label"><i></i> {{ t("liveDemo") }}</span>
-          </div>
-          <p class="aside-caption">{{ t("sameFrequency") }}</p>
-          <article class="voice-card">
-            <div class="card-overline">
-              <span class="connection-dot"></span> {{ t("voiceChat") }}
-            </div>
-            <div class="voice-title">
-              <span class="channel-icon"><Icon name="headset" :size="23" /></span>
-              <div>
-                <h3>{{ t("campfire") }}</h3>
-                <span>{{ t("forest") }} <span class="dim">/</span> {{ t("voiceChannel") }}</span>
-              </div>
-            </div>
-            <div class="voice-members">
-              <span class="avatar mini sage">de</span><span class="avatar mini blue">m_</span
-              ><span class="avatar mini amber">n</span><span>{{ t("hangingOut") }}</span>
-            </div>
-            <button
-              class="join-button"
-              @click="
-                feedback = t('voiceUnavailable');
-                dialog = 'server';
-              "
-            >
-              {{ t("joinChat") }} <Icon name="exit" :size="17" />
-            </button>
-          </article>
-          <article class="listening-card">
-            <div class="card-overline">
-              <span class="music-note">♫</span> {{ t("listenTogether") }}
-            </div>
-            <div class="track">
-              <div class="album-art" aria-hidden="true">
-                <span></span><span></span><span></span><span></span>
-              </div>
-              <div><strong>Weird Fishes / Arpeggi</strong><span>Radiohead · In Rainbows</span></div>
-              <div class="equalizer" aria-hidden="true"><i></i><i></i><i></i></div>
-            </div>
-            <div class="track-progress"><span></span></div>
-            <div class="track-footer">
-              <span><i class="connection-dot"></i> {{ t("novaListening") }}</span
-              ><span>03:12 / 05:18</span>
-            </div>
-          </article>
+        <aside v-if="section === 'home'" class="activity-column">
+          <h2>{{ t("incomingRequests") }}</h2>
+          <p class="recommendation-intro">{{ communication.incomingFriends.length }}</p>
+          <button class="text-button" @click="navigate('friends')">
+            {{ t("yourFriends") }}<Icon name="arrow" :size="16" />
+          </button>
           <div class="activity-divider"></div>
-          <article class="invite-card">
-            <div class="invite-art" aria-hidden="true">
-              <Icon name="leaf" :size="40" /><span>+</span>
-            </div>
-            <h3>{{ t("yourPeople") }}<br />{{ t("yourPlace") }}</h3>
-            <p>{{ t("createBeginning") }}<br />{{ t("startSomething") }}</p>
-            <button class="text-button" @click="openDialog('server')">
-              {{ t("createSpace") }} <Icon name="arrow" :size="16" />
-            </button>
-          </article>
-          <div class="aside-footer">
-            <span class="cord-mini">cord_</span><span>{{ t("closer") }}</span>
-          </div>
+          <h2>{{ t("createSpace") }}</h2>
+          <p class="recommendation-intro">{{ t("createServerHint") }}</p>
+          <button class="primary-button" @click="openDialog('server')">
+            <Icon name="plus" :size="16" />{{ t("createServer") }}
+          </button>
         </aside>
       </main>
-
-      <ChatPanel
-        v-else
-        :key="activeThread"
-        :thread-id="activeThread"
-        :title="activeTitle"
-        :subtitle="activeSubtitle"
-        v-bind="selectedFriend ? { friendId: selectedFriend.id } : {}"
-        @back="navigate(selectedFriend ? 'messages' : 'home')"
-      />
       <footer class="statusbar">
         <span
-          ><span class="connection-dot"></span> {{ t("systemsQuiet") }}
-          <span class="status-divider">/</span> {{ t("interfacePreview") }}</span
-        ><span>{{ t("yourRules") }}<span class="accent"> ▪</span></span>
+          ><span
+            class="connection-dot"
+            :class="{ 'is-offline': communication.status !== 'connected' }"
+          ></span
+          >{{
+            t(
+              communication.status === "connected"
+                ? "realtimeConnected"
+                : communication.status === "connecting"
+                  ? "realtimeConnecting"
+                  : "realtimeOffline",
+            )
+          }}</span
+        ><span>{{ t("yourRules") }}</span>
       </footer>
     </div>
-
     <div
       v-if="dialog"
       class="modal-backdrop"
-      @click.self="dialog = null"
-      @keydown.esc="dialog = null"
+      @click.self="closeDialog"
+      @keydown.esc.stop="closeDialog"
     >
       <section
         ref="modalElement"
-        @keydown="trapFocus"
+        class="modal"
         role="dialog"
         aria-modal="true"
         aria-labelledby="modal-title"
-        class="modal"
         tabindex="-1"
+        :aria-busy="pending"
+        @keydown="trapFocus"
       >
-        <button class="modal-close" :aria-label="t('close')" autofocus @click="dialog = null">
+        <button
+          class="modal-close"
+          :disabled="pending"
+          :aria-label="t('close')"
+          @click="closeDialog"
+        >
           <Icon name="close" />
         </button>
-        <div class="eyebrow">{{ t("cordPreview") }}</div>
-        <h2 id="modal-title">
-          {{
-            dialog === "friend"
-              ? t("makeConnection")
-              : dialog === "settings"
-                ? t("yourFrequency")
-                : t("spaceTogether")
-          }}
-        </h2>
-        <template v-if="dialog === 'friend'"
-          ><p>{{ t("friendDescription") }}</p>
-          <form @submit.prevent="submitFriend">
-            <label for="friend-handle">{{ t("username") }}</label
-            ><input
-              id="friend-handle"
-              v-model="friendHandle"
-              required
-              maxlength="64"
-              :placeholder="t('exampleHandle')"
-            /><button class="primary-button" type="submit">
-              {{ t("previewRequest") }} <Icon name="arrow" :size="17" />
-            </button></form></template
-        ><template v-else-if="dialog === 'settings'"
-          ><p>
-            {{ t("settingsDescription") }}
+        <div class="eyebrow">cord_</div>
+        <h2 id="modal-title">{{ t(modalTitle) }}</h2>
+        <form
+          v-if="
+            dialog === 'server' || dialog === 'channel' || dialog === 'join' || dialog === 'friend'
+          "
+          @submit.prevent="submit"
+        >
+          <p>
+            {{
+              t(
+                dialog === "server"
+                  ? "createServerHint"
+                  : dialog === "channel"
+                    ? "channelNameHint"
+                    : dialog === "join"
+                      ? "inviteCodeHint"
+                      : "friendRequestDescription",
+              )
+            }}
           </p>
-          <button
-            class="setting-toggle"
-            :aria-pressed="store.deafened"
-            @click="store.deafened = !store.deafened"
-          >
-            <Icon name="headset" /> {{ t("deafenPreview") }}
-            <strong>{{ store.deafened ? t("on") : t("off") }}</strong>
+          <label for="resource-name">{{
+            t(
+              dialog === "server"
+                ? "serverName"
+                : dialog === "channel"
+                  ? "channelName"
+                  : dialog === "join"
+                    ? "inviteCode"
+                    : "username",
+            )
+          }}</label
+          ><input
+            id="resource-name"
+            v-model="formName"
+            :disabled="pending"
+            required
+            :maxlength="dialog === 'server' ? 80 : dialog === 'channel' ? 64 : 32"
+            :pattern="
+              dialog === 'channel'
+                ? '[A-Za-z0-9][A-Za-z0-9-]{0,63}'
+                : dialog === 'join'
+                  ? '[A-Za-z0-9_-]{32}'
+                  : undefined
+            "
+            :aria-describedby="dialog === 'server' ? 'server-name-hint' : undefined"
+            autocomplete="off"
+          />
+          <p v-if="dialog === 'server'" id="server-name-hint">{{ t("serverNameHint") }}</p>
+          <button class="primary-button" type="submit" :disabled="pending || !formName.trim()">
+            {{ t(pending ? "authPending" : dialog === "friend" ? "sendRequest" : modalTitle)
+            }}<Icon name="arrow" :size="16" />
+          </button>
+        </form>
+        <template v-else-if="dialog === 'invite'"
+          ><p>{{ t("inviteReady") }}</p>
+          <label v-if="invite" for="invite-code">{{ t("inviteCode") }}</label
+          ><input
+            v-if="invite"
+            id="invite-code"
+            :value="invite"
+            readonly
+            @focus="($event.target as HTMLInputElement).select()"
+          /><button v-if="invite" class="primary-button" @click="copyInvite">
+            {{ t(copied ? "copied" : "copy") }}</button
+          ><button v-else class="primary-button" :disabled="pending" @click="submit">
+            {{ t(pending ? "authPending" : "invitePeople") }}</button
+          ><button class="text-button resource-block" :disabled="pending" @click="revokeInvites">
+            {{ t("revokeInvites") }}
           </button></template
         >
-        <p v-else>
-          {{ (feedback === "voice" ? t("voiceUnavailable") : "") || t("serverUnavailable") }}
-        </p>
-        <p v-if="feedback && dialog === 'friend'" class="form-feedback" role="status">
-          {{ t("requestFeedback", { handle: friendHandle.trim() }) }}
-        </p>
+        <template v-else-if="dialog === 'members'"
+          ><p v-if="pending" role="status">{{ t("loading") }}</p>
+          <article v-for="member in members" :key="member.user.id" class="friend-row">
+            <span class="friend-info"
+              ><strong>{{ member.user.username }}</strong
+              ><span>{{ t(member.owner ? "owner" : "member") }}</span></span
+            ><button
+              v-if="isOwner && !member.owner"
+              class="text-button"
+              :aria-label="t('removeMember')"
+              @click="
+                confirm(async () => {
+                  if (activeServerId)
+                    await session.api.removeMember(activeServerId, member.user.id);
+                })
+              "
+            >
+              <Icon name="close" :size="16" />
+            </button>
+          </article>
+          <button
+            v-if="memberCursor"
+            class="primary-button"
+            :disabled="pending"
+            @click="loadMembers(true)"
+          >
+            {{ t("more") }}
+          </button></template
+        >
+        <template v-else-if="dialog === 'settings'"
+          ><p>{{ t("accountPreferences") }}</p>
+          <AppearanceControls /><button class="primary-button" @click="enableNotifications">
+            {{ t("enableNotifications") }}</button
+          ><button class="primary-button" @click="openDialog('friend')">
+            {{ t("addFriend") }}
+          </button></template
+        >
+        <template v-else-if="dialog === 'confirm'"
+          ><p>{{ t("destructiveHint") }}</p>
+          <button class="primary-button" :disabled="pending" @click="submit">
+            {{ t(pending ? "authPending" : "confirmAction") }}</button
+          ><button class="text-button resource-block" :disabled="pending" @click="closeDialog">
+            {{ t("cancel") }}
+          </button></template
+        >
+        <p v-if="formError" class="form-feedback" role="alert">{{ t(formError) }}</p>
+        <p v-if="formSuccess" class="form-feedback" role="status">{{ t(formSuccess) }}</p>
       </section>
     </div>
   </div>
 </template>
-
 <style scoped>
 .app-shell {
   display: flex;
@@ -2089,6 +2513,81 @@ h3 {
   .recommendation-card {
     padding: 13px;
     gap: 10px;
+  }
+}
+</style>
+
+<style scoped>
+.real-server {
+  font: 600 13px var(--mono);
+}
+.server-room-heading strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.server-actions {
+  display: grid;
+  gap: 9px;
+  margin: 20px 11px;
+}
+.resource-note {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.8;
+  padding: 8px 11px;
+}
+.resource-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  padding: 8px 20px;
+  background: var(--active);
+  color: var(--text);
+  font-size: 12px;
+  gap: 12px;
+}
+.resource-block {
+  display: flex;
+  margin-top: 18px;
+}
+.is-offline {
+  background: var(--muted);
+}
+.room-list button > span,
+.recommendation-copy > strong {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.profile > div {
+  min-width: 0;
+}
+.profile strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+.friend-row > button {
+  flex-shrink: 0;
+}
+.breadcrumb {
+  min-width: 0;
+}
+.breadcrumb > strong,
+.breadcrumb > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 480px) {
+  .friend-row {
+    flex-wrap: wrap;
+  }
+  .friend-info {
+    min-width: 90px;
   }
 }
 </style>

@@ -37,6 +37,10 @@ export function createClientRouter(history: RouterHistory) {
     scrollBehavior: () => ({ top: 0 }),
   });
   router.beforeEach(async (to) => {
+    if (to.name === "login" && to.query.logoutFailed !== "1" && to.query.registered !== "1") {
+      if (await useSessionStore().verify()) return { name: "dashboard" };
+      return true;
+    }
     if (to.name !== "dashboard") return true;
     const session = useSessionStore();
     if (await session.verify()) return true;

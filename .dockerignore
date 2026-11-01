@@ -26,3 +26,14 @@ node_modules
 # Local implementation reports and planning notes.
 /result/
 packages/database/src/generated
+
+# Private runtime data and optional provider/signing files are not build inputs.
+.data
+backups
+**/google-services.json
+**/GoogleService-Info.plist
+**/*.jks
+**/*.keystore
+**/*.p12
+**/*.p8
+**/*.mobileprovision

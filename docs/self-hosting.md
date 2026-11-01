@@ -1,53 +1,63 @@
-# Self-hosting target
+# Self-hosting
 
-## Bundled frontend preview
+This repository provides a loopback development stack and a standalone self-hosting stack. The new communication/media implementation is not yet verified; run the handoff in [verification.md](verification.md).
 
-The base `compose.yaml` provides separate `web` (Caddy), `api` (Express), development PostgreSQL, and a one-shot `migrate` service. This is a local preview of the frontend, not a complete deployable communication service; the API implements liveness, shared middleware, real accounts, and revocable database sessions. Persistent messaging is deferred.
-
-```sh
-cp .env.example .env # Only when a local .env does not already exist.
-docker compose up -d --build --wait web postgres
-```
-
-Open http://localhost:8081. `WEB_PORT` changes the host port. Caddy listens on port 80 inside its container. The web service depends on a healthy API, which waits for PostgreSQL and successful account/session migrations. Start the whole chain with `docker compose up -d --build --wait web`.
-
-`infra/docker/web.Dockerfile` uses a pinned Node/pnpm build stage and a Caddy 2.11.7 Alpine runtime stage. Only `apps/web/dist` and `infra/proxy/Caddyfile` enter the runtime; it does not run Node, Vite, or a package installer. There are no source bind mounts in this service. Rebuild after changing the frontend or Caddy configuration.
-
-Caddy proxies `/api` and `/api/*` to `api:3000` without stripping the versioned path. Unknown API endpoints return backend JSON errors rather than the frontend document. The API is also mapped to host loopback port `API_PORT` (default 3001); see [api.md](api.md). Caddy provides compression, an HTTP health endpoint at `/healthz`, HTML5-history fallback for direct links such as `/dashboard`, non-cached HTML, and immutable caching for hashed `/assets/` files. Missing assets return 404 instead of the SPA document. `/healthz` only checks the static web server; it says nothing about database or future API health.
-
-The local preview intentionally uses HTTP on a loopback-only binding. It does not issue certificates or expose a public listener. Caddy was chosen for its concise SPA/static configuration and automatic certificate management when a domain-based deployment is introduced. Nginx can also serve the same bundle; no performance comparison is implied.
-
-## Development server
-
-The optional `compose.dev.yaml` adds a separate `web-dev` service at http://localhost:5173 with hot-reload source mounts and switches the same `api` service to watched development sources:
+## Local stack
 
 ```sh
-docker compose -f compose.yaml -f compose.dev.yaml up -d --build web-dev
+docker compose --env-file .env.example up -d --build --wait web api media
 ```
 
-The bundled `web` service and Vite `web-dev` service can run together on different ports. Use `--env-file .env.example` before the Compose command when you want the documented example values without a real `.env`.
+Caddy serves the bundled client at `http://localhost:8081`, proxies HTTP/Socket.IO `/api` paths to Express, and provides SPA fallback. API and PostgreSQL host bindings are loopback ports 3001 and 5433. The `migrate` service applies committed migrations before API starts. Development defaults are `cord` database/user/password; use them only locally. Existing PostgreSQL initialization values do not change credentials on an existing volume.
 
-## Database addresses and credentials
+`postgres-data` holds PostgreSQL 18 data at `/var/lib/postgresql`; `uploads-data` holds private uploaded files. Preserve both. `docker compose down` retains volumes; do not use `down -v` for an upgrade.
 
-Development defaults are database `cord`, user `cord`, password `cord`, and host port `5433`. The PostgreSQL container still listens on its standard port `5432`. The host mapping avoids a host-installed PostgreSQL server on port 5432.
+LiveKit signaling is loopback port 7880, ICE TCP 7881, and UDP mux 7882. `infra/media/livekit.local.yaml` advertises loopback, so it is for clients on the same machine. `LIVEKIT_URL` is the URL returned to clients; `LIVEKIT_INTERNAL_URL` is server-only administration access. The API/LiveKit keypair must match. Local placeholder media keys in `.env.example` must be replaced before sharing a deployment.
 
-| Client location | Address | Example connection URL |
-| --- | --- | --- |
-| Host machine | `127.0.0.1:5433` | `postgresql://cord:cord@127.0.0.1:5433/cord` |
-| API on the Compose network | `postgres:5432` | `postgresql://cord:cord@postgres:5432/cord` |
+For source-watched API/Vite:
 
-Compose uses service names for internal DNS. `localhost` inside a container refers to that container, not the host or another service. Port publishing is `host-port:container-port`; changing `POSTGRES_PORT` changes only the host binding.
+```sh
+docker compose --env-file .env.example -f compose.yaml -f compose.dev.yaml up --build api web-dev media
+```
 
-The API requires `DATABASE_URL`. Host API/Prisma commands read the root `.env`; `.env.example` supplies the host URL. Compose derives its internal URL from `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB` using `postgres:5432`. URL-encode special characters in connection credentials. The one-shot migration service applies committed Prisma migrations before API startup. Never pass database credentials through frontend environment variables.
+Vite runs at port 5173. Both Vite adapters proxy WebSocket upgrades. Rebuild after dependency/migration changes. Root host commands use `.env` and `127.0.0.1:5433`; containers use `postgres:5432`. Never expose database credentials through a Vite variable.
 
-The development password is a temporary local placeholder. PostgreSQL initialization environment variables only create credentials on a fresh data volume; changing `.env` does not alter an existing database user's password. Keep volumes intact and explicitly migrate credentials when needed. `docker compose down` preserves `postgres-data`; never use `down -v` unless deletion is explicitly requested.
+## Standalone self-hosting stack
 
-## Future production deployment
+`compose.self-host.yaml` is a separate file, not a merge override. It publishes web HTTPS and media ICE/TURN ports, without API/database development host ports.
 
-A public deployment will need a separate configuration without development database host ports, a real domain and reachable HTTP/HTTPS ports, persistent Caddy certificate storage, strong operator-managed secrets, reviewed native origins/CORS and trusted-proxy policies, WebSocket routing when introduced, a migration release procedure, and backups with verified restores. Set `API_ALLOWED_ORIGINS` to an empty value for same-origin web hosting; the local `null` allowance exists only for Electron file-origin development. Do not treat the current HTTP preview as that completed deployment.
+Create `.env.production` outside Git. Supply real `CORD_DOMAIN` and `MEDIA_DOMAIN` DNS names; both must resolve to the host. Supply `POSTGRES_DB`, `POSTGRES_USER`, a strong URL-safe `POSTGRES_PASSWORD`, and a distinct `LIVEKIT_API_KEY`/`LIVEKIT_API_SECRET` (at least 32 characters). `API_ALLOWED_ORIGINS` must list only native origins you intentionally support; add `null` only if the packaged desktop file renderer is supported. Browser API calls remain same-origin and use the exact HTTPS `API_WEB_ORIGINS` configured by Compose.
 
-The PostgreSQL 18 image mounts its volume at `/var/lib/postgresql`. Major version upgrades require a data migration; changing only the image tag is insufficient. Pin production images by reviewed versions/digests during deployment preparation.
+```sh
+docker compose --env-file .env.production -f compose.self-host.yaml up -d --build
+```
 
-Electron and Capacitor development shells reuse the shared client with bundled assets and hash routing; see [native-clients.md](native-clients.md). The shared account forms use the real API; Electron defaults to the loopback API and can select `VITE_API_URL` at build time. Native runtime authentication/networking requires validation; the remaining conversation features are local demos. TURN/SFU services and required UDP ports will be documented when voice/video features are added.
+Caddy terminates HTTPS for both domains and persists certificates in `caddy-data`/`caddy-config`. The app domain proxies `/api` including Socket.IO; the media domain proxies LiveKit signaling. Secure host-only cookies are enabled. Allow inbound 80/443 TCP, optional 443 UDP for HTTP/3, media 7881 TCP and 7882 UDP, and TURN 3478 UDP. Configure NAT port forwarding/public IP discovery appropriately. The self-host media configuration includes embedded UDP TURN. Networks permitting only TURN/TLS on 443 need a dedicated TURN domain/IP/certificate configuration; the included stack does not claim that network restriction is solved by HTTP reverse proxying.
 
-References: [Caddy SPA patterns](https://caddyserver.com/docs/caddyfile/patterns#single-page-apps-spas), [Caddy automatic HTTPS](https://caddyserver.com/docs/automatic-https), [Nginx try_files](https://nginx.org/en/docs/http/ngx_http_core_module.html#try_files), and [PostgreSQL Docker image](https://hub.docker.com/_/postgres).
+The API is one instance; rate limits, Socket.IO presence, and typing are process-local. A distributed deployment would require a shared adapter and reviewed proxy policy. Uploads are private local-volume files, not public static assets. Consider operator quotas, malware scanning, and retention requirements for your deployment. No secret manager, automatic updates, or public runtime validation is implied.
+
+## Backups and restoration
+
+`pnpm backup [directory]` uses `.env` and `compose.yaml` by default. It stops API writers, creates a custom-format PostgreSQL dump and an uploads archive with restrictive local permissions, then restarts the API. Set `CORD_ENV_FILE=.env.production` and `CORD_COMPOSE_FILE=compose.self-host.yaml` for self-hosting.
+
+```sh
+CORD_ENV_FILE=.env.production CORD_COMPOSE_FILE=compose.self-host.yaml pnpm backup
+```
+
+Store environment/secrets and certificate/operator configuration separately in protected storage. Test restores on a disposable stack before relying on backups.
+
+`pnpm restore <directory>` refuses to replace current data unless `CORD_CONFIRM_RESTORE=REPLACE_CURRENT_DATA` is explicitly set. Restoration stops the API, replaces database contents and uploaded files, then starts it only after success. Failed restoration leaves the API stopped. This is destructive; take a separate current backup first. These scripts have not been executed for this slice.
+
+## Media references
+
+[LiveKit deployment](https://docs.livekit.io/transport/self-hosting/deployment/), [ports/firewall](https://docs.livekit.io/transport/self-hosting/ports-firewall/), and [pinned server configuration](https://github.com/livekit/livekit/blob/v1.13.11/config-sample.yaml) describe the separate signaling and media-plane requirements. Image `livekit/livekit-server:v1.13.11` is pinned to a published release; an image pull/runtime check remains part of user verification.
+
+## Optional Android FCM delivery
+
+The default stack remains usable without external push. For background/killed-app Android delivery, supply the private client/provider configuration described in [native-clients.md](native-clients.md). Set `PUSH_CREDENTIALS_FILE` to the external server service-account JSON and merge `compose.push.yaml` with the selected stack:
+
+```sh
+docker compose --env-file .env.production -f compose.self-host.yaml -f compose.push.yaml up -d --build
+```
+
+The override enables push and mounts credentials read-only; no credentials are committed. Provider project setup, policies, availability, and actual device delivery are operator verification tasks. The optional provider does not make local self-hosting dependent on Firebase.

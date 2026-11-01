@@ -7,7 +7,14 @@ import { dummyPasswordHash, hashPassword, verifyPassword } from "./password.ts";
 const publicUser = { id: true, username: true } as const;
 const hashToken = (token: string) => createHash("sha256").update(token).digest("hex");
 export function createAuthService(database: Database) {
+  const revocations = new Set<(token: string) => void>();
   return {
+    onRevoked(listener: (token: string) => void) {
+      revocations.add(listener);
+      return () => {
+        revocations.delete(listener);
+      };
+    },
     async register(input: RegisterRequest): Promise<PublicUser> {
       const passwordHash = await hashPassword(input.password);
       try {
@@ -55,6 +62,7 @@ export function createAuthService(database: Database) {
     },
     async logout(token: string): Promise<void> {
       await database.session.deleteMany({ where: { tokenHash: hashToken(token) } });
+      for (const listener of revocations) listener(token);
     },
   };
 }
